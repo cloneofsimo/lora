@@ -1,8 +1,28 @@
 # Low-rank Adaptation for Fast Text-to-Image Diffusion Fine-tuning
 
-![name](contents/alpha_scale.gif)
+<!-- #region -->
+<p align="center">
+<img  src="contents/alpha_scale.gif">
+</p>
+<!-- #endregion -->
 
 > Using LORA to fine tune on illustration dataset : $W = W_0 + \alpha \Delta W$, where $\alpha$ is the merging ratio. Above gif is scaling alpha from 0 to 1. Setting alpha to 0 is same as using the original model, and setting alpha to 1 is same as using the fully fine-tuned model.
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/disney_lora.jpg">
+</p>
+<!-- #endregion -->
+
+> "style of sks, baby lion", with disney-style LORA model.
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/pop_art.jpg">
+</p>
+<!-- #endregion -->
+
+> "style of sks, superman", with pop-art style LORA model.
 
 ## Main Features
 
