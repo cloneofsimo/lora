@@ -1,6 +1,8 @@
 # Low-rank Adaptation for Fast Text-to-Image Diffusion Fine-tuning
 
-![name](contents/alpha_scale.mp4)
+![name](contents/alpha_scale.gif)
+
+> Using LORA to fine tune on illustration dataset : $W = W_0 + \alpha \Delta W$, where $\alpha$ is the merging ratio. Above gif is scaling alpha from 0 to 1. Setting alpha to 0 is same as using the original model, and setting alpha to 1 is same as using the fully fine-tuned model.
 
 ## Main Features
 
