@@ -1,14 +1,14 @@
 # Low-rank Adaptation for Fast Text-to-Image Diffusion Fine-tuning
 
+![name](contents/alpha_scale.mp4)
+
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
 - Get insanely small end result, easy to share and download.
 - Easy to use, compatible with diffusers
 - Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
-- Merge checkpoints by merging LORA models!
-
-Want to fine-tune a diffusion model, but is irritated by the long training time + enormous end-result model? Annoyed that everyone creates their own checkpoints, and you have to literally download 100 different models just to find what's best for you? Want to quickly merge checkpoints, but without making another insane checkpoint model? _LORA is for you._
+- Merge checkpoints by merging LORA
 
 # Lengthy Introduction
 
