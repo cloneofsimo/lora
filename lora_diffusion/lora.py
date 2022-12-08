@@ -104,7 +104,7 @@ def save_lora_as_json(model, path="./lora.json"):
 
 
 def weight_apply_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"]
+    model, loras, target_replace_module=["CrossAttention", "Attention"], alpha=1.0
 ):
 
     for _module in model.modules():
@@ -114,11 +114,13 @@ def weight_apply_lora(
 
                     weight = _child_module.weight
 
-                    up_weight = loras.pop(0)
-                    down_weight = loras.pop(0)
+                    up_weight = loras.pop(0).detach().to(weight.device)
+                    down_weight = loras.pop(0).detach().to(weight.device)
 
                     # W <- W + U * D
-                    weight = weight + (up_weight @ down_weight).type(weight.dtype)
+                    weight = weight + alpha * (up_weight @ down_weight).type(
+                        weight.dtype
+                    )
                     _child_module.weight = nn.Parameter(weight)
 
 
@@ -154,6 +156,8 @@ def monkeypatch_lora(
                     _module._modules[name].lora_down.weight = nn.Parameter(
                         down_weight.type(weight.dtype)
                     )
+
+                    _module._modules[name].to(weight.device)
 
 
 def tune_lora_scale(model, alpha: float = 1.0):

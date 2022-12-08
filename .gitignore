@@ -1,3 +1,6 @@
 data_*
 output_*
-__*
+__pycache__
+*.pyc
+__test*
+merged_lora*
