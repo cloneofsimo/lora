@@ -6,6 +6,7 @@ import hashlib
 import itertools
 import math
 import os
+import inspect
 from pathlib import Path
 from typing import Optional
 
@@ -915,10 +916,18 @@ def main(args):
         if accelerator.sync_gradients:
             if args.save_steps and global_step - last_save >= args.save_steps:
                 if accelerator.is_main_process:
+                    # newer versions of accelerate allow the 'keep_fp32_wrapper' arg. without passing
+                    # it, the models will be unwrapped, and when they are then used for further training,
+                    # we will crash. pass this, but only to newer versions of accelerate. fixes
+                    # https://github.com/huggingface/diffusers/issues/1566
+                    accepts_keep_fp32_wrapper = "keep_fp32_wrapper" in set(
+                        inspect.signature(accelerator.unwrap_model).parameters.keys()
+                    )
+                    extra_args = {"keep_fp32_wrapper": True} if accepts_keep_fp32_wrapper else {}
                     pipeline = StableDiffusionPipeline.from_pretrained(
                         args.pretrained_model_name_or_path,
-                        unet=accelerator.unwrap_model(unet, True),
-                        text_encoder=accelerator.unwrap_model(text_encoder, True),
+                        unet=accelerator.unwrap_model(unet, **extra_args),
+                        text_encoder=accelerator.unwrap_model(text_encoder, **extra_args),
                         revision=args.revision,
                     )
 
