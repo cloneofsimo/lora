@@ -61,6 +61,7 @@ class DreamBoothDataset(Dataset):
         class_prompt=None,
         size=512,
         center_crop=False,
+        color_jitter=False,
     ):
         self.size = size
         self.center_crop = center_crop
@@ -93,6 +94,9 @@ class DreamBoothDataset(Dataset):
                 transforms.CenterCrop(size)
                 if center_crop
                 else transforms.RandomCrop(size),
+                transforms.ColorJitter(0.2, 0.1)
+                if color_jitter
+                else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -247,6 +251,11 @@ def parse_args(input_args=None):
         help="Whether to center crop images before resizing to resolution",
     )
     parser.add_argument(
+        "--color_jitter",
+        action="store_true",
+        help="Whether to apply color jitter to images",
+    )
+    parser.add_argument(
         "--train_text_encoder",
         action="store_true",
         help="Whether to train the text encoder",
@@ -273,7 +282,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--save_steps",
         type=int,
-        default=500,
+        default=10,
         help="Save checkpoint every X updates steps.",
     )
     parser.add_argument(
@@ -290,8 +299,14 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=5e-6,
+        default=None,
         help="Initial learning rate (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
+        "--learning_rate_text",
+        type=float,
+        default=5e-6,
+        help="Initial learning rate for text encoder (after the potential warmup period) to use.",
     )
     parser.add_argument(
         "--scale_lr",
@@ -552,8 +567,8 @@ def main(args):
     unet_lora_params, _ = inject_trainable_lora(unet)
 
     for _up, _down in extract_lora_ups_down(unet):
-        print("Before training: Unet First Layer lora up", _up.weight)
-        print("Before training: Unet First Layer lora down", _down.weight)
+        print("Before training: Unet First Layer lora up", _up.weight.data)
+        print("Before training: Unet First Layer lora down", _down.weight.data)
         break
 
     vae.requires_grad_(False)
@@ -566,8 +581,10 @@ def main(args):
         for _up, _down in extract_lora_ups_down(
             text_encoder, target_replace_module=["CLIPAttention"]
         ):
-            print("Before training: text encoder First Layer lora up", _up.weight)
-            print("Before training: text encoder First Layer lora down", _down.weight)
+            print("Before training: text encoder First Layer lora up", _up.weight.data)
+            print(
+                "Before training: text encoder First Layer lora down", _down.weight.data
+            )
             break
 
     if args.gradient_checkpointing:
@@ -596,8 +613,20 @@ def main(args):
     else:
         optimizer_class = torch.optim.AdamW
 
+    text_lr = (
+        args.learning_rate
+        if args.learning_rate_text is None
+        else args.learning_rate_text
+    )
+
     params_to_optimize = (
-        itertools.chain(*unet_lora_params, *text_encoder_lora_params)
+        [
+            {"params": itertools.chain(*unet_lora_params), "lr": args.learning_rate},
+            {
+                "params": itertools.chain(*text_encoder_lora_params),
+                "lr": text_lr,
+            },
+        ]
         if args.train_text_encoder
         else itertools.chain(*unet_lora_params)
     )
@@ -621,6 +650,7 @@ def main(args):
         tokenizer=tokenizer,
         size=args.resolution,
         center_crop=args.center_crop,
+        color_jitter=args.color_jitter,
     )
 
     def collate_fn(examples):
@@ -850,11 +880,34 @@ def main(args):
                     filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
                     print(f"save weights {filename_unet}, {filename_text_encoder}")
                     save_lora_weight(pipeline.unet, filename_unet)
-                    save_lora_weight(
-                        pipeline.text_encoder,
-                        filename_text_encoder,
-                        target_replace_module=["CLIPAttention"],
-                    )
+                    if args.train_text_encoder:
+                        save_lora_weight(
+                            pipeline.text_encoder,
+                            filename_text_encoder,
+                            target_replace_module=["CLIPAttention"],
+                        )
+
+                    for _up, _down in extract_lora_ups_down(pipeline.unet):
+                        print("First Unet Layer's Up Weight is now : ", _up.weight.data)
+                        print(
+                            "First Unet Layer's Down Weight is now : ",
+                            _down.weight.data,
+                        )
+                        break
+                    if args.train_text_encoder:
+                        for _up, _down in extract_lora_ups_down(
+                            pipeline.text_encoder,
+                            target_replace_module=["CLIPAttention"],
+                        ):
+                            print(
+                                "First Text Encoder Layer's Up Weight is now : ",
+                                _up.weight.data,
+                            )
+                            print(
+                                "First Text Encoder Layer's Down Weight is now : ",
+                                _down.weight.data,
+                            )
+                            break
 
                     last_save = global_step
 
@@ -879,16 +932,12 @@ def main(args):
         print("\n\nLora TRAINING DONE!\n\n")
 
         save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
-        save_lora_weight(
-            pipeline.text_encoder,
-            args.output_dir + "/lora_weight.text_encoder.pt",
-            target_replace_module=["CLIPAttention"],
-        )
-
-        for _up, _down in extract_lora_ups_down(pipeline.unet):
-            print("First Layer's Up Weight is now : ", _up.weight)
-            print("First Layer's Down Weight is now : ", _down.weight)
-            break
+        if args.train_text_encoder:
+            save_lora_weight(
+                pipeline.text_encoder,
+                args.output_dir + "/lora_weight.text_encoder.pt",
+                target_replace_module=["CLIPAttention"],
+            )
 
         if args.push_to_hub:
             repo.push_to_hub(
