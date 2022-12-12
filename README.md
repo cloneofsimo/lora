@@ -10,6 +10,14 @@
 
 <!-- #region -->
 <p align="center">
+<img  src="contents/lora_with_clip.jpg">
+</p>
+<!-- #endregion -->
+
+> "game character bnha, wearing a red shirt, riding a donkey", with Overwatch-fine-tuned LORA model, for both CLIP and Unet.
+
+<!-- #region -->
+<p align="center">
 <img  src="contents/disney_lora.jpg">
 </p>
 <!-- #endregion -->
