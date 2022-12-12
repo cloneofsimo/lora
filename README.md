@@ -212,7 +212,7 @@ Checkout `scripts/run_img2img.ipynb` for an example of how to make inference wit
 
 ---
 
-# Tips and Suggestions
+# Tips and Discussions
 
 ### **How long should you train?**
 
@@ -232,6 +232,10 @@ You can see that with 2500 steps, you already get somewhat good results.
 ### **What is a good learning rate for LoRA?**
 
 People using dreambooth are used to using lr around `1e-6`, but this is way too small for training LoRAs. **I've tried using 1e-4, and it is OK**. I think these values should be more explored statistically.
+
+### **Training tips in general**
+
+- Discussion by @nitrosocke, can be found here. https://github.com/cloneofsimo/lora/issues/19
 
 ### **What happens to Text Encoder LoRA and Unet LoRA?**
 
