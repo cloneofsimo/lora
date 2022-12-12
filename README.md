@@ -106,13 +106,37 @@ An example of this can be found in `train_lora_dreambooth.py`. Run this example 
 run_lora_db.sh
 ```
 
-## Loading, merging, and interpolating trained LORAs.
+## Loading, merging, and interpolating trained LORAs with CLIs.
 
 We've seen that people have been merging different checkpoints with different ratios, and this seems to be very useful to the community. LORA is extremely easy to merge.
 
 By the nature of LORA, one can interpolate between different fine-tuned models by adding different $A, B$ matrices.
 
-Currently, LORA cli has two options : merge full model with LORA, or merge LORA with LORA.
+Currently, LORA cli has three options : merge full model with LORA, merge LORA with LORA, or merge full model with LORA and changes to `ckpt` format (original format)
+
+```
+SYNOPSIS
+    lora_add PATH_1 PATH_2 OUTPUT_PATH <flags>
+
+POSITIONAL ARGUMENTS
+    PATH_1
+        Type: str
+    PATH_2
+        Type: str
+    OUTPUT_PATH
+        Type: str
+
+FLAGS
+    --alpha
+        Type: float
+        Default: 0.5
+    --mode
+        Type: Literal['upl', 'lpl', 'upl', 'upl-ckpt-v2']
+        Default: 'lpl'
+    --with_text_lora
+        Type: bool
+        Default: False
+```
 
 ### Merging full model with LORA
 
@@ -163,6 +187,14 @@ Set alpha to 0.5 to get the average of the two models. Set alpha close to 1.0 to
 ```bash
 $ lora_add --path_1 lora_illust.pt --path_2 lora_pop.pt --alpha 0.3 --output_path lora_merged.pt
 ```
+
+### More bash examples with Text Encoder Lora:
+
+```bash
+$ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_kiriko.pt --mode upl-ckpt-v2 --alpha 1.2 --with_text_lora --output_path merged_model.ckpt
+```
+
+: This will build a `merged_model.ckpt` with LoRA merged with $\alpha=1.2$ and text encoder LORA.
 
 ### Making Text2Img Inference with trained LORA
 
