@@ -32,10 +32,11 @@
 - Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints by merging LORA
 
-## UPDATES & Notes
+# UPDATES & Notes
 
+- **Converting to CKPT format for A1111's repo consumption!** (Thanks to [jachiam](https://github.com/jachiam)'s conversion script)
 - Img2Img Examples added.
-- Please! Use large learning rate! Around 1e-4 worked well for me, but certainly not around 1e-6 which will not be able to learn anything.
+- Please use large learning rate! Around 1e-4 worked well for me, but certainly not around 1e-6 which will not be able to learn anything.
 
 # Lengthy Introduction
 
@@ -97,9 +98,9 @@ We've seen that people have been merging different checkpoints with different ra
 
 By the nature of LORA, one can interpolate between different fine-tuned models by adding different $A, B$ matrices.
 
-Currently, LORA cli has two options : merge unet with LORA, or merge LORA with LORA.
+Currently, LORA cli has two options : merge full model with LORA, or merge LORA with LORA.
 
-### Merging unet with LORA
+### Merging full model with LORA
 
 ```bash
 $ lora_add --path_1 PATH_TO_DIFFUSER_FORMAT_MODEL --path_2 PATH_TO_LORA.PT --mode upl --alpha 1.0 --output_path OUTPUT_PATH
@@ -111,12 +112,22 @@ $$
 W' = W + \alpha \Delta W
 $$
 
-So, set alpha to 1.0 to fully add LORA. If the LORA seems to have too much effect (i.e., overfitted), set alpha to lower value. If the LORA seems to have too little effect, set alpha to higher than 1.0. You can tune these values to your needs.
+So, set alpha to 1.0 to fully add LORA. If the LORA seems to have too much effect (i.e., overfitted), set alpha to lower value. If the LORA seems to have too little effect, set alpha to higher than 1.0. You can tune these values to your needs. This value can be even slightly greater than 1.0!
 
 **Example**
 
 ```bash
 $ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_illust.pt --mode upl --alpha 1.0 --output_path merged_model
+```
+
+### Mergigng Full model with LORA and changing to original CKPT format
+
+_TESTED WITH V2, V2.1 ONLY!_
+
+Everything same as above, but with mode `upl-ckpt-v2` instead of `upl`.
+
+```bash
+$ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_illust.pt --mode upl-ckpt-v2 --alpha 1.2 --output_path merged_model.ckpt
 ```
 
 ### Merging LORA with LORA
