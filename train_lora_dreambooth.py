@@ -549,16 +549,26 @@ def main(args):
         revision=args.revision,
     )
     unet.requires_grad_(False)
-    unet_lora_params, train_names = inject_trainable_lora(unet)
+    unet_lora_params, _ = inject_trainable_lora(unet)
 
     for _up, _down in extract_lora_ups_down(unet):
-        print(_up.weight)
-        print(_down.weight)
+        print("Before training: Unet First Layer lora up", _up.weight)
+        print("Before training: Unet First Layer lora down", _down.weight)
         break
 
     vae.requires_grad_(False)
-    if not args.train_text_encoder:
-        text_encoder.requires_grad_(False)
+    text_encoder.requires_grad_(False)
+
+    if args.train_text_encoder:
+        text_encoder_lora_params, _ = inject_trainable_lora(
+            text_encoder, target_replace_module=["CLIPAttention"]
+        )
+        for _up, _down in extract_lora_ups_down(
+            text_encoder, target_replace_module=["CLIPAttention"]
+        ):
+            print("Before training: text encoder First Layer lora up", _up.weight)
+            print("Before training: text encoder First Layer lora down", _down.weight)
+            break
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
@@ -587,7 +597,7 @@ def main(args):
         optimizer_class = torch.optim.AdamW
 
     params_to_optimize = (
-        itertools.chain(*unet_lora_params, text_encoder.parameters())
+        itertools.chain(*unet_lora_params, *text_encoder_lora_params)
         if args.train_text_encoder
         else itertools.chain(*unet_lora_params)
     )
@@ -834,11 +844,17 @@ def main(args):
                         revision=args.revision,
                     )
 
-                    filename = (
+                    filename_unet = (
                         f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.pt"
                     )
-                    print(f"save weights {filename}")
-                    save_lora_weight(pipeline.unet, filename)
+                    filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
+                    print(f"save weights {filename_unet}, {filename_text_encoder}")
+                    save_lora_weight(pipeline.unet, filename_unet)
+                    save_lora_weight(
+                        pipeline.text_encoder,
+                        filename_text_encoder,
+                        target_replace_module=["CLIPAttention"],
+                    )
 
                     last_save = global_step
 
@@ -863,6 +879,11 @@ def main(args):
         print("\n\nLora TRAINING DONE!\n\n")
 
         save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
+        save_lora_weight(
+            pipeline.text_encoder,
+            args.output_dir + "/lora_weight.text_encoder.pt",
+            target_replace_module=["CLIPAttention"],
+        )
 
         for _up, _down in extract_lora_ups_down(pipeline.unet):
             print("First Layer's Up Weight is now : ", _up.weight)
