@@ -164,6 +164,42 @@ def monkeypatch_lora(
                     _module._modules[name].to(weight.device)
 
 
+def monkeypatch_replace_lora(
+    model, loras, target_replace_module=["CrossAttention", "Attention"]
+):
+    for _module in model.modules():
+        if _module.__class__.__name__ in target_replace_module:
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+
+                    weight = _child_module.linear.weight
+                    bias = _child_module.linear.bias
+                    _tmp = LoraInjectedLinear(
+                        _child_module.linear.in_features,
+                        _child_module.linear.out_features,
+                        _child_module.linear.bias is not None,
+                    )
+                    _tmp.linear.weight = weight
+
+                    if bias is not None:
+                        _tmp.linear.bias = bias
+
+                    # switch the module
+                    _module._modules[name] = _tmp
+
+                    up_weight = loras.pop(0)
+                    down_weight = loras.pop(0)
+
+                    _module._modules[name].lora_up.weight = nn.Parameter(
+                        up_weight.type(weight.dtype)
+                    )
+                    _module._modules[name].lora_down.weight = nn.Parameter(
+                        down_weight.type(weight.dtype)
+                    )
+
+                    _module._modules[name].to(weight.device)
+
+
 def tune_lora_scale(model, alpha: float = 1.0):
     for _module in model.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
