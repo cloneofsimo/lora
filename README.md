@@ -24,6 +24,10 @@
 
 > "style of sks, superman", with pop-art style LORA model.
 
+# Web Demo
+
+Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/ysharma/Low-rank-Adaptation)
+
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
