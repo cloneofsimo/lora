@@ -32,6 +32,11 @@
 - Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints by merging LORA
 
+## UPDATES & Notes
+
+- Img2Img Examples added.
+- Please! Use large learning rate! Around 1e-4 worked well for me, but certainly not around 1e-6 which will not be able to learn anything.
+
 # Lengthy Introduction
 
 Thanks to the generous work of Stability AI and Huggingface, so many people have enjoyed fine-tuning stable diffusion models to fit their needs and generate higher fidelity images. **However, the fine-tuning process is very slow, and it is not easy to find a good balance between the number of steps and the quality of the results.**
@@ -134,6 +139,10 @@ Set alpha to 0.5 to get the average of the two models. Set alpha close to 1.0 to
 $ lora_add --path_1 lora_illust.pt --path_2 lora_pop.pt --alpha 0.3 --output_path lora_merged.pt
 ```
 
-### Making Inference with trained LORA
+### Making Text2Img Inference with trained LORA
 
 Checkout `scripts/run_inference.ipynb` for an example of how to make inference with LORA.
+
+### Making Img2Img Inference with LORA
+
+Checkout `scripts/run_img2img.ipynb` for an example of how to make inference with LORA.
