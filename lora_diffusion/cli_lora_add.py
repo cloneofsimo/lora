@@ -1,18 +1,20 @@
 from typing import Literal, Union, Dict
-
+import os
+import shutil
 import fire
 from diffusers import StableDiffusionPipeline
 
 import torch
 from .lora import tune_lora_scale, weight_apply_lora
+from .to_ckpt_v2 import convert_to_ckpt
 
 
 def add(
     path_1: str,
     path_2: str,
-    output_path: str = "./merged_lora.pt",
+    output_path: str,
     alpha: float = 0.5,
-    mode: Literal["lpl", "upl"] = "lpl",
+    mode: Literal["lpl", "upl", "upl-ckpt-v2"] = "lpl",
 ):
     if mode == "lpl":
         out_list = []
@@ -39,10 +41,25 @@ def add(
 
         weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
 
-        if output_path.endswith(".pt"):
-            output_path = output_path[:-3]
-
         loaded_pipeline.save_pretrained(output_path)
+
+    elif mode == "upl-ckpt-v2":
+
+        loaded_pipeline = StableDiffusionPipeline.from_pretrained(
+            path_1,
+        ).to("cpu")
+
+        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
+
+        _tmp_output = output_path + ".tmp"
+
+        loaded_pipeline.save_pretrained(_tmp_output)
+        convert_to_ckpt(_tmp_output, output_path, as_half=True)
+        # remove the tmp_output folder
+        shutil.rmtree(_tmp_output)
+
+    else:
+        raise ValueError(f"Unknown mode {mode}")
 
 
 def main():
