@@ -31,9 +31,11 @@
 - Easy to use, compatible with diffusers
 - Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints by merging LORA
+- Fine-tune both CLIP & Unet to gain better results.
 
 # UPDATES & Notes
 
+- **You can now fine-tune text_encoder as well! Enabled with simple `--train_text_encoder`**
 - **Converting to CKPT format for A1111's repo consumption!** (Thanks to [jachiam](https://github.com/jachiam)'s conversion script)
 - Img2Img Examples added.
 - Please use large learning rate! Around 1e-4 worked well for me, but certainly not around 1e-6 which will not be able to learn anything.
