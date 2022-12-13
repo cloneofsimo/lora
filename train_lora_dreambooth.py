@@ -167,6 +167,12 @@ def parse_args(input_args=None):
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
+        "--pretrained_vae_name_or_path",
+        type=str,
+        default=None,
+        help="Path to pretrained vae or vae identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
         "--revision",
         type=str,
         default=None,
@@ -553,10 +559,10 @@ def main(args):
         subfolder="text_encoder",
         revision=args.revision,
     )
-    vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="vae",
-        revision=args.revision,
+    vae = AutoencoderKL.from_pretrained(        
+        args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,
+        subfolder=None if args.pretrained_vae_name_or_path else "vae",
+        revision=None if args.pretrained_vae_name_or_path else args.revision,
     )
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path,
