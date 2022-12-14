@@ -32,18 +32,20 @@
 
 > "style of sks, superman", with pop-art style LoRA model.
 
-# Web Demo
-
-Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/ysharma/Low-rank-Adaptation)
-
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
-- Get insanely small end result, easy to share and download.
-- Easy to use, compatible with diffusers
-- Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
-- Merge checkpoints by merging LoRA
+- Get insanely small end result (3MB for just unet, 6MB for both unet + clip), easy to share and download.
+- Easy to use, compatible with `diffusers`
+- Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
+- Merge checkpoints + Build recipes by merging LoRAs together
 - Fine-tune both CLIP & Unet to gain better results.
+
+# Web Demo
+
+- Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/ysharma/Low-rank-Adaptation)
+
+- Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
 
@@ -257,7 +259,9 @@ People using dreambooth are used to using lr around `1e-6`, but this is way too 
 
 ### **Training tips in general**
 
-- Discussion by @nitrosocke, can be found here. https://github.com/cloneofsimo/lora/issues/19
+- Discussion by @nitrosocke, can be found [here](https://github.com/cloneofsimo/lora/issues/19#issuecomment-1347149627)
+- Configurations by @xsteenbrugge, Using Clip-interrogator to get a decent prompt seems to work well for him, https://twitter.com/xsteenbrugge/status/1602799180698763264
+- Super easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 ### **What happens to Text Encoder LoRA and Unet LoRA?**
 
