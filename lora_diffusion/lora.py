@@ -54,24 +54,26 @@ def inject_trainable_lora(
                         _child_module.in_features,
                         _child_module.out_features,
                         _child_module.bias is not None,
-                        r,
                     )
                     _tmp.linear.weight = weight
                     if bias is not None:
                         _tmp.linear.bias = bias
 
                     # switch the module
-                    _module._modules[name] = _tmp
+                    if name == 'to_out.0':
+                        _module._modules['to_out']._modules['0'] = _tmp
+                    else:
+                        _module._modules[name] = _tmp
 
                     require_grad_params.append(
-                        _module._modules[name].lora_up.parameters()
+                        _tmp.lora_up.parameters()
                     )
                     require_grad_params.append(
-                        _module._modules[name].lora_down.parameters()
+                        _tmp.lora_down.parameters()
                     )
 
-                    _module._modules[name].lora_up.weight.requires_grad = True
-                    _module._modules[name].lora_down.weight.requires_grad = True
+                    _tmp.lora_up.weight.requires_grad = True
+                    _tmp.lora_down.weight.requires_grad = True
                     names.append(name)
 
     return require_grad_params, names
