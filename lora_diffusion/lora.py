@@ -3,6 +3,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import PIL
+import copy
 import torch
 import torch.nn.functional as F
 
