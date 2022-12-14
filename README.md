@@ -238,6 +238,15 @@ $$
 
 # Tips and Discussions
 
+## **Training tips in general**
+
+I'm curating a list of tips and discussions here. Feel free to add your own tips and discussions with a PR!
+
+- Discussion by @nitrosocke, can be found [here](https://github.com/cloneofsimo/lora/issues/19#issuecomment-1347149627)
+- Configurations by @xsteenbrugge, Using Clip-interrogator to get a decent prompt seems to work well for him, https://twitter.com/xsteenbrugge/status/1602799180698763264
+- Super easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
+- [Amazing in-depth analysis](https://github.com/cloneofsimo/lora/discussions/37) on the effect of rank, $\alpha_{unet}$, $\alpha_{clip}$, and training configurations from brian6091!
+
 ### **How long should you train?**
 
 Effect of fine tuning (both Unet + CLIP) can be seen in the following image, where each image is another 500 steps.
@@ -256,12 +265,6 @@ You can see that with 2500 steps, you already get somewhat good results.
 ### **What is a good learning rate for LoRA?**
 
 People using dreambooth are used to using lr around `1e-6`, but this is way too small for training LoRAs. **I've tried using 1e-4, and it is OK**. I think these values should be more explored statistically.
-
-### **Training tips in general**
-
-- Discussion by @nitrosocke, can be found [here](https://github.com/cloneofsimo/lora/issues/19#issuecomment-1347149627)
-- Configurations by @xsteenbrugge, Using Clip-interrogator to get a decent prompt seems to work well for him, https://twitter.com/xsteenbrugge/status/1602799180698763264
-- Super easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 ### **What happens to Text Encoder LoRA and Unet LoRA?**
 
@@ -292,6 +295,17 @@ With LoRA Text Encoder, Unet, all the schedulers, guidance scale, negative promp
 <!-- #endregion -->
 
 > Left with tuned $\alpha_{unet} = 0.6$, $\alpha_{text} = 0.9$, right with $\alpha_{unet} = 1.0$, $\alpha_{text} = 1.0$.
+
+Here is an extensive visualization on the effect of $\alpha_{unet}$, $\alpha_{text}$, by @brian6091 from [his analysis
+](https://github.com/cloneofsimo/lora/discussions/37)
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/comp_scale_clip_unet.jpg">
+</p>
+<!-- #endregion -->
+
+> "a photo of (S\*)", trained with 21 images, with rank 16 LoRA. More details can be found [here](https://github.com/cloneofsimo/lora/discussions/37)
 
 ---
 
