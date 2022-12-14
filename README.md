@@ -183,7 +183,7 @@ $ lora_add --path_1 PATH_TO_LORA.PT --path_2 PATH_TO_LORA.PT --mode lpl --alpha 
 alpha is the ratio of the first model to the second model. i.e.,
 
 $$
-\Delta W = (\alpha A_1 + (1 - \alpha) A_2) (B_1 + (1 - \alpha) B_2)^T
+\Delta W = (\alpha A_1 + (1 - \alpha) A_2) (\alpha B_1 + (1 - \alpha) B_2)^T
 $$
 
 Set alpha to 0.5 to get the average of the two models. Set alpha close to 1.0 to get more effect of the first model, and set alpha close to 0.0 to get more effect of the second model.
@@ -209,6 +209,28 @@ Checkout `scripts/run_inference.ipynb` for an example of how to make inference w
 ### Making Img2Img Inference with LoRA
 
 Checkout `scripts/run_img2img.ipynb` for an example of how to make inference with LoRA.
+
+### Merging Lora with Lora, and making inference dynamically using `monkeypatch_add_lora`.
+
+Checkout `scripts/merge_lora_with_lora.ipynb` for an example of how to merge Lora with Lora, and make inference dynamically using `monkeypatch_add_lora`.
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/lora_with_clip_and_illust.jpg">
+</p>
+<!-- #endregion -->
+
+Above results are from merging `lora_illust.pt` with `lora_kiriko.pt` with both 1.0 as weights and 0.5 as $\alpha$.
+
+$$
+W_{unet} \leftarrow W_{unet} + 0.5 (A_{kiriko} + A_{illust})(B_{kiriko} + B_{illust})^T
+$$
+
+and
+
+$$
+W_{clip} \leftarrow W_{clip} + 0.5 A_{kiriko}B_{kiriko}^T
+$$
 
 ---
 

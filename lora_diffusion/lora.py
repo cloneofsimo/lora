@@ -12,10 +12,12 @@ import torch.nn as nn
 class LoraInjectedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=False, r=4):
         super().__init__()
-        
+
         if r >= min(in_features, out_features):
-            raise ValueError(f"LoRA rank {r} must be less than {min(in_features, out_features)}")
-        
+            raise ValueError(
+                f"LoRA rank {r} must be less than {min(in_features, out_features)}"
+            )
+
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
         self.lora_up = nn.Linear(r, out_features, bias=False)
@@ -29,7 +31,9 @@ class LoraInjectedLinear(nn.Module):
 
 
 def inject_trainable_lora(
-    model: nn.Module, target_replace_module: List[str] = ["CrossAttention", "Attention"], r: int = 4
+    model: nn.Module,
+    target_replace_module: List[str] = ["CrossAttention", "Attention"],
+    r: int = 4,
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -200,6 +204,36 @@ def monkeypatch_replace_lora(
                     )
                     _module._modules[name].lora_down.weight = nn.Parameter(
                         down_weight.type(weight.dtype)
+                    )
+
+                    _module._modules[name].to(weight.device)
+
+
+def monkeypatch_add_lora(
+    model,
+    loras,
+    target_replace_module=["CrossAttention", "Attention"],
+    alpha: float = 1.0,
+    beta: float = 1.0,
+):
+    for _module in model.modules():
+        if _module.__class__.__name__ in target_replace_module:
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+
+                    weight = _child_module.linear.weight
+
+                    up_weight = loras.pop(0)
+                    down_weight = loras.pop(0)
+
+                    _module._modules[name].lora_up.weight = nn.Parameter(
+                        up_weight.type(weight.dtype).to(weight.device) * alpha
+                        + _module._modules[name].lora_up.weight.to(weight.device) * beta
+                    )
+                    _module._modules[name].lora_down.weight = nn.Parameter(
+                        down_weight.type(weight.dtype).to(weight.device) * alpha
+                        + _module._modules[name].lora_down.weight.to(weight.device)
+                        * beta
                     )
 
                     _module._modules[name].to(weight.device)
