@@ -138,6 +138,30 @@ def weight_apply_lora(
                     )
                     _child_module.weight = nn.Parameter(weight)
 
+def weight_self_apply_lora(
+    lora_model, target_replace_module=["CrossAttention", "Attention"], alpha=1.0
+):  
+    # Self apply weights to a lora-injected model, and return normal model
+    for _module in lora_model.modules():
+        if _module.__class__.__name__ in target_replace_module:
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+
+                    weight = _child_module.linear.weight
+                    up_weight = _child_module.lora_up.weight.to(weight.device)
+                    down_weight = _child_module.lora_down.weight.to(weight.device)
+
+                    linear = copy.deepcopy(_child_module.linear)
+                    # W <- W + U * D
+                    linear.weight = torch.nn.Parameter(weight + alpha * (up_weight @ down_weight).type(
+                        weight.dtype
+                    ))
+
+                    if name == 'to_out.0':
+                        _module._modules['to_out']._modules['0'] = linear
+                    else:
+                        _module._modules[name] = linear
+    return lora_model
 
 def monkeypatch_lora(
     model, loras, target_replace_module=["CrossAttention", "Attention"]
