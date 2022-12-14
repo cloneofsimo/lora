@@ -55,6 +55,7 @@ def inject_trainable_lora(
                         _child_module.in_features,
                         _child_module.out_features,
                         _child_module.bias is not None,
+                        r
                     )
                     _tmp.linear.weight = weight
                     if bias is not None:
