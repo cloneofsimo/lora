@@ -26,15 +26,23 @@ def add(
     ] = "lpl",
     with_text_lora: bool = False,
 ):
+    print("Lora Add, mode " + mode)
     if mode == "lpl":
-        assert output_path.endswith(".pt"), "Only .pt files are supported"
-
-        for _path_1, _path_2 in (
-            [(path_1, path_2)] + [(_text_lora_path(path_1), _text_lora_path(path_2))]
+        for _path_1, _path_2, opt in [(path_1, path_2, "unet")] + (
+            [(_text_lora_path(path_1), _text_lora_path(path_2), "text_encoder")]
             if with_text_lora
             else []
         ):
+            print("Loading", _path_1, _path_2)
             out_list = []
+            if opt == "text_encoder":
+                if not os.path.exists(_path_1):
+                    print(f"No text encoder found in {_path_1}, skipping...")
+                    continue
+                if not os.path.exists(_path_2):
+                    print(f"No text encoder found in {_path_1}, skipping...")
+                    continue
+
             l1 = torch.load(_path_1)
             l2 = torch.load(_path_2)
 
@@ -42,18 +50,24 @@ def add(
             l2pairs = zip(l2[::2], l2[1::2])
 
             for (x1, y1), (x2, y2) in zip(l1pairs, l2pairs):
+                # print("Merging", x1.shape, y1.shape, x2.shape, y2.shape)
                 x1.data = alpha * x1.data + (1 - alpha) * x2.data
                 y1.data = alpha * y1.data + (1 - alpha) * y2.data
 
                 out_list.append(x1)
                 out_list.append(y1)
 
-        torch.save(out_list, output_path)
-        if with_text_lora:
-            torch.save(
-                out_list,
-                _text_lora_path(output_path),
-            )
+            if opt == "unet":
+
+                print("Saving merged UNET to", output_path)
+                torch.save(out_list, output_path)
+
+            elif opt == "text_encoder":
+                print("Saving merged text encoder to", _text_lora_path(output_path))
+                torch.save(
+                    out_list,
+                    _text_lora_path(output_path),
+                )
 
     elif mode == "upl":
 
@@ -96,6 +110,7 @@ def add(
         shutil.rmtree(_tmp_output)
 
     else:
+        print("Unknown mode", mode)
         raise ValueError(f"Unknown mode {mode}")
 
 
