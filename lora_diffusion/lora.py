@@ -3,6 +3,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import PIL
+import copy
 import torch
 import torch.nn.functional as F
 
@@ -54,24 +55,27 @@ def inject_trainable_lora(
                         _child_module.in_features,
                         _child_module.out_features,
                         _child_module.bias is not None,
-                        r,
+                        r
                     )
                     _tmp.linear.weight = weight
                     if bias is not None:
                         _tmp.linear.bias = bias
 
                     # switch the module
-                    _module._modules[name] = _tmp
+                    if name == 'to_out.0':
+                        _module._modules['to_out']._modules['0'] = _tmp
+                    else:
+                        _module._modules[name] = _tmp
 
                     require_grad_params.append(
-                        _module._modules[name].lora_up.parameters()
+                        _tmp.lora_up.parameters()
                     )
                     require_grad_params.append(
-                        _module._modules[name].lora_down.parameters()
+                        _tmp.lora_down.parameters()
                     )
 
-                    _module._modules[name].lora_up.weight.requires_grad = True
-                    _module._modules[name].lora_down.weight.requires_grad = True
+                    _tmp.lora_up.weight.requires_grad = True
+                    _tmp.lora_down.weight.requires_grad = True
                     names.append(name)
 
     return require_grad_params, names
@@ -136,6 +140,30 @@ def weight_apply_lora(
                     )
                     _child_module.weight = nn.Parameter(weight)
 
+def weight_self_apply_lora(
+    lora_model, target_replace_module=["CrossAttention", "Attention"], alpha=1.0
+):  
+    # Self apply weights to a lora-injected model, and return normal model
+    for _module in lora_model.modules():
+        if _module.__class__.__name__ in target_replace_module:
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+
+                    weight = _child_module.linear.weight
+                    up_weight = _child_module.lora_up.weight.to(weight.device)
+                    down_weight = _child_module.lora_down.weight.to(weight.device)
+
+                    linear = copy.deepcopy(_child_module.linear)
+                    # W <- W + U * D
+                    linear.weight = torch.nn.Parameter(weight + alpha * (up_weight @ down_weight).type(
+                        weight.dtype
+                    ))
+
+                    if name == 'to_out.0':
+                        _module._modules['to_out']._modules['0'] = linear
+                    else:
+                        _module._modules[name] = linear
+    return lora_model
 
 def monkeypatch_lora(
     model, loras, target_replace_module=["CrossAttention", "Attention"]
