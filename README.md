@@ -32,18 +32,20 @@
 
 > "style of sks, superman", with pop-art style LoRA model.
 
-# Web Demo
-
-Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/ysharma/Low-rank-Adaptation)
-
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
-- Get insanely small end result, easy to share and download.
-- Easy to use, compatible with diffusers
-- Sometimes even better performance than full fine-tuning (but left as future work for extensive comparisons)
-- Merge checkpoints by merging LoRA
+- Get insanely small end result (3MB for just unet, 6MB for both unet + clip), easy to share and download.
+- Easy to use, compatible with `diffusers`
+- Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
+- Merge checkpoints + Build recipes by merging LoRAs together
 - Fine-tune both CLIP & Unet to gain better results.
+
+# Web Demo
+
+- Integrated into [Huggingface Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/ysharma/Low-rank-Adaptation)
+
+- Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
 
@@ -183,7 +185,7 @@ $ lora_add --path_1 PATH_TO_LORA.PT --path_2 PATH_TO_LORA.PT --mode lpl --alpha 
 alpha is the ratio of the first model to the second model. i.e.,
 
 $$
-\Delta W = (\alpha A_1 + (1 - \alpha) A_2) (B_1 + (1 - \alpha) B_2)^T
+\Delta W = (\alpha A_1 + (1 - \alpha) A_2) (\alpha B_1 + (1 - \alpha) B_2)^T
 $$
 
 Set alpha to 0.5 to get the average of the two models. Set alpha close to 1.0 to get more effect of the first model, and set alpha close to 0.0 to get more effect of the second model.
@@ -210,9 +212,40 @@ Checkout `scripts/run_inference.ipynb` for an example of how to make inference w
 
 Checkout `scripts/run_img2img.ipynb` for an example of how to make inference with LoRA.
 
+### Merging Lora with Lora, and making inference dynamically using `monkeypatch_add_lora`.
+
+Checkout `scripts/merge_lora_with_lora.ipynb` for an example of how to merge Lora with Lora, and make inference dynamically using `monkeypatch_add_lora`.
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/lora_with_clip_and_illust.jpg">
+</p>
+<!-- #endregion -->
+
+Above results are from merging `lora_illust.pt` with `lora_kiriko.pt` with both 1.0 as weights and 0.5 as $\alpha$.
+
+$$
+W_{unet} \leftarrow W_{unet} + 0.5 (A_{kiriko} + A_{illust})(B_{kiriko} + B_{illust})^T
+$$
+
+and
+
+$$
+W_{clip} \leftarrow W_{clip} + 0.5 A_{kiriko}B_{kiriko}^T
+$$
+
 ---
 
 # Tips and Discussions
+
+## **Training tips in general**
+
+I'm curating a list of tips and discussions here. Feel free to add your own tips and discussions with a PR!
+
+- Discussion by @nitrosocke, can be found [here](https://github.com/cloneofsimo/lora/issues/19#issuecomment-1347149627)
+- Configurations by @xsteenbrugge, Using Clip-interrogator to get a decent prompt seems to work well for him, https://twitter.com/xsteenbrugge/status/1602799180698763264
+- Super easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
+- [Amazing in-depth analysis](https://github.com/cloneofsimo/lora/discussions/37) on the effect of rank, $\alpha_{unet}$, $\alpha_{clip}$, and training configurations from brian6091!
 
 ### **How long should you train?**
 
@@ -232,10 +265,6 @@ You can see that with 2500 steps, you already get somewhat good results.
 ### **What is a good learning rate for LoRA?**
 
 People using dreambooth are used to using lr around `1e-6`, but this is way too small for training LoRAs. **I've tried using 1e-4, and it is OK**. I think these values should be more explored statistically.
-
-### **Training tips in general**
-
-- Discussion by @nitrosocke, can be found here. https://github.com/cloneofsimo/lora/issues/19
 
 ### **What happens to Text Encoder LoRA and Unet LoRA?**
 
@@ -266,6 +295,17 @@ With LoRA Text Encoder, Unet, all the schedulers, guidance scale, negative promp
 <!-- #endregion -->
 
 > Left with tuned $\alpha_{unet} = 0.6$, $\alpha_{text} = 0.9$, right with $\alpha_{unet} = 1.0$, $\alpha_{text} = 1.0$.
+
+Here is an extensive visualization on the effect of $\alpha_{unet}$, $\alpha_{text}$, by @brian6091 from [his analysis
+](https://github.com/cloneofsimo/lora/discussions/37)
+
+<!-- #region -->
+<p align="center">
+<img  src="contents/comp_scale_clip_unet.jpg">
+</p>
+<!-- #endregion -->
+
+> "a photo of (S\*)", trained with 21 images, with rank 16 LoRA. More details can be found [here](https://github.com/cloneofsimo/lora/discussions/37)
 
 ---
 

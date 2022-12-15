@@ -167,6 +167,12 @@ def parse_args(input_args=None):
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
+        "--pretrained_vae_name_or_path",
+        type=str,
+        default=None,
+        help="Path to pretrained vae or vae identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
         "--revision",
         type=str,
         default=None,
@@ -295,6 +301,12 @@ def parse_args(input_args=None):
         "--gradient_checkpointing",
         action="store_true",
         help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+    )
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=4,
+        help="Rank of LoRA approximation.",
     )
     parser.add_argument(
         "--learning_rate",
@@ -553,10 +565,10 @@ def main(args):
         subfolder="text_encoder",
         revision=args.revision,
     )
-    vae = AutoencoderKL.from_pretrained(
-        args.pretrained_model_name_or_path,
-        subfolder="vae",
-        revision=args.revision,
+    vae = AutoencoderKL.from_pretrained(        
+        args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,
+        subfolder=None if args.pretrained_vae_name_or_path else "vae",
+        revision=None if args.pretrained_vae_name_or_path else args.revision,
     )
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path,
@@ -564,7 +576,7 @@ def main(args):
         revision=args.revision,
     )
     unet.requires_grad_(False)
-    unet_lora_params, _ = inject_trainable_lora(unet)
+    unet_lora_params, _ = inject_trainable_lora(unet, r=args.lora_rank)
 
     for _up, _down in extract_lora_ups_down(unet):
         print("Before training: Unet First Layer lora up", _up.weight.data)
@@ -576,7 +588,8 @@ def main(args):
 
     if args.train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
-            text_encoder, target_replace_module=["CLIPAttention"]
+            text_encoder, target_replace_module=["CLIPAttention"],
+             r=args.lora_rank,
         )
         for _up, _down in extract_lora_ups_down(
             text_encoder, target_replace_module=["CLIPAttention"]
