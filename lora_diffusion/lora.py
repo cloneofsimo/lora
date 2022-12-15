@@ -13,9 +13,9 @@ class LoraInjectedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=False, r=4):
         super().__init__()
 
-        if r >= min(in_features, out_features):
+        if r > min(in_features, out_features):
             raise ValueError(
-                f"LoRA rank {r} must be less than {min(in_features, out_features)}"
+                f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
             )
 
         self.linear = nn.Linear(in_features, out_features, bias)
@@ -138,7 +138,7 @@ def weight_apply_lora(
 
 
 def monkeypatch_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"]
+    model, loras, target_replace_module=["CrossAttention", "Attention"], r: int = 4
 ):
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -151,6 +151,7 @@ def monkeypatch_lora(
                         _child_module.in_features,
                         _child_module.out_features,
                         _child_module.bias is not None,
+                        r=r,
                     )
                     _tmp.linear.weight = weight
 
@@ -174,7 +175,7 @@ def monkeypatch_lora(
 
 
 def monkeypatch_replace_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"]
+    model, loras, target_replace_module=["CrossAttention", "Attention"], r: int = 4
 ):
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -187,6 +188,7 @@ def monkeypatch_replace_lora(
                         _child_module.linear.in_features,
                         _child_module.linear.out_features,
                         _child_module.linear.bias is not None,
+                        r=r,
                     )
                     _tmp.linear.weight = weight
 
