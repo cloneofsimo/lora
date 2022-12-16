@@ -34,6 +34,7 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: List[str] = ["CrossAttention", "Attention"],
     r: int = 4,
+    loras = None # path to lora .pt
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -41,6 +42,9 @@ def inject_trainable_lora(
 
     require_grad_params = []
     names = []
+
+    if loras != None:
+        loras = torch.load(loras)
 
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -62,7 +66,7 @@ def inject_trainable_lora(
 
                     # switch the module
                     _module._modules[name] = _tmp
-
+                    
                     require_grad_params.append(
                         _module._modules[name].lora_up.parameters()
                     )
@@ -70,10 +74,13 @@ def inject_trainable_lora(
                         _module._modules[name].lora_down.parameters()
                     )
 
+                    if loras != None:
+                        _module._modules[name].lora_up.weight = loras.pop(0)
+                        _module._modules[name].lora_down.weight = loras.pop(0)
+
                     _module._modules[name].lora_up.weight.requires_grad = True
                     _module._modules[name].lora_down.weight.requires_grad = True
                     names.append(name)
-
     return require_grad_params, names
 
 
@@ -245,3 +252,96 @@ def tune_lora_scale(model, alpha: float = 1.0):
     for _module in model.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
             _module.scale = alpha
+
+
+def _text_lora_path(path: str) -> str:
+    assert path.endswith(".pt"), "Only .pt files are supported"
+    return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
+
+
+def _ti_lora_path(path: str) -> str:
+    assert path.endswith(".pt"), "Only .pt files are supported"
+    return ".".join(path.split(".")[:-1] + ["ti", "pt"])
+
+
+def load_learned_embed_in_clip(
+    learned_embeds_path, text_encoder, tokenizer, token=None
+):
+    loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
+
+    # separate token and the embeds
+    trained_token = list(loaded_learned_embeds.keys())[0]
+    embeds = loaded_learned_embeds[trained_token]
+
+    # cast to dtype of text_encoder
+    dtype = text_encoder.get_input_embeddings().weight.dtype
+
+    # add the token in tokenizer
+    token = token if token is not None else trained_token
+    num_added_tokens = tokenizer.add_tokens(token)
+    i = 1
+    while num_added_tokens == 0:
+        print(f"The tokenizer already contains the token {token}.")
+        token = f"{token[:-1]}-{i}>"
+        print(f"Attempting to add the token {token}.")
+        num_added_tokens = tokenizer.add_tokens(token)
+        i += 1
+
+    # resize the token embeddings
+    text_encoder.resize_token_embeddings(len(tokenizer))
+
+    # get the id for the token and assign the embeds
+    token_id = tokenizer.convert_tokens_to_ids(token)
+    text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+    return token
+
+
+def patch_pipe(
+    pipe,
+    unet_path,
+    token,
+    alpha: float = 1.0,
+    r: int = 4,
+    patch_text=False,
+    patch_ti=False,
+):
+
+    ti_path = _ti_lora_path(unet_path)
+    text_path = _text_lora_path(unet_path)
+
+    unet_has_lora = False
+    text_encoder_has_lora = False
+
+    for _module in pipe.unet.modules():
+        if _module.__class__.__name__ == "LoraInjectedLinear":
+            unet_has_lora = True
+
+    for _module in pipe.text_encoder.modules():
+        if _module.__class__.__name__ == "LoraInjectedLinear":
+            text_encoder_has_lora = True
+
+    if not unet_has_lora:
+        monkeypatch_lora(pipe.unet, torch.load(unet_path), r=r)
+    else:
+        monkeypatch_replace_lora(pipe.unet, torch.load(unet_path), r=r)
+
+    if patch_text:
+        if not text_encoder_has_lora:
+            monkeypatch_lora(
+                pipe.text_encoder,
+                torch.load(text_path),
+                target_replace_module=["CLIPAttention"],
+                r=r,
+            )
+        else:
+
+            monkeypatch_replace_lora(
+                pipe.text_encoder,
+                torch.load(text_path),
+                target_replace_module=["CLIPAttention"],
+                r=r,
+            )
+    if patch_ti:
+        token = load_learned_embed_in_clip(
+            ti_path, pipe.text_encoder, pipe.tokenizer, token
+        )
