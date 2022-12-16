@@ -178,7 +178,7 @@ class DreamBoothTiDataset(Dataset):
 
         placeholder_string = self.placeholder_token
         text = random.choice(self.templates).format(placeholder_string)
-        print(text)
+
         example["instance_prompt_ids"] = self.tokenizer(
             text,
             padding="do_not_pad",
@@ -230,7 +230,7 @@ def save_progress(text_encoder, placeholder_token_id, accelerator, args, save_pa
         .get_input_embeddings()
         .weight[placeholder_token_id]
     )
-    print("Current Learned Embeddings: ", learned_embeds)
+    print("Current Learned Embeddings: ", learned_embeds[:4])
     print("saved to ", save_path)
     learned_embeds_dict = {args.placeholder_token: learned_embeds.detach().cpu()}
     torch.save(learned_embeds_dict, save_path)
@@ -972,9 +972,6 @@ def main(args):
                     else unet.parameters()
                 )
                 accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
-
-            for param_group in optimizer.param_groups:
-                print(param_group["lr"])
 
             optimizer.step()
             lr_scheduler.step()
