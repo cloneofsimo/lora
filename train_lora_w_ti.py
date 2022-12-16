@@ -46,7 +46,60 @@ import random
 import re
 
 
-class DreamBoothDataset(Dataset):
+imagenet_templates_small = [
+    "a photo of a {}",
+    "a rendering of a {}",
+    "a cropped photo of the {}",
+    "the photo of a {}",
+    "a photo of a clean {}",
+    "a photo of a dirty {}",
+    "a dark photo of the {}",
+    "a photo of my {}",
+    "a photo of the cool {}",
+    "a close-up photo of a {}",
+    "a bright photo of the {}",
+    "a cropped photo of a {}",
+    "a photo of the {}",
+    "a good photo of the {}",
+    "a photo of one {}",
+    "a close-up photo of the {}",
+    "a rendition of the {}",
+    "a photo of the clean {}",
+    "a rendition of a {}",
+    "a photo of a nice {}",
+    "a good photo of a {}",
+    "a photo of the nice {}",
+    "a photo of the small {}",
+    "a photo of the weird {}",
+    "a photo of the large {}",
+    "a photo of a cool {}",
+    "a photo of a small {}",
+]
+
+imagenet_style_templates_small = [
+    "a painting in the style of {}",
+    "a rendering in the style of {}",
+    "a cropped painting in the style of {}",
+    "the painting in the style of {}",
+    "a clean painting in the style of {}",
+    "a dirty painting in the style of {}",
+    "a dark painting in the style of {}",
+    "a picture in the style of {}",
+    "a cool painting in the style of {}",
+    "a close-up painting in the style of {}",
+    "a bright painting in the style of {}",
+    "a cropped painting in the style of {}",
+    "a good painting in the style of {}",
+    "a close-up painting in the style of {}",
+    "a rendition in the style of {}",
+    "a nice painting in the style of {}",
+    "a small painting in the style of {}",
+    "a weird painting in the style of {}",
+    "a large painting in the style of {}",
+]
+
+
+class DreamBoothTiDataset(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
@@ -55,7 +108,8 @@ class DreamBoothDataset(Dataset):
     def __init__(
         self,
         instance_data_root,
-        instance_prompt,
+        learnable_property,
+        placeholder_token,
         tokenizer,
         class_data_root=None,
         class_prompt=None,
@@ -73,7 +127,15 @@ class DreamBoothDataset(Dataset):
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
         self.num_instance_images = len(self.instance_images_path)
-        self.instance_prompt = instance_prompt
+
+        self.placeholder_token = placeholder_token
+
+        self.templates = (
+            imagenet_style_templates_small
+            if learnable_property == "style"
+            else imagenet_templates_small
+        )
+
         self._length = self.num_instance_images
 
         if class_data_root is not None:
@@ -113,8 +175,12 @@ class DreamBoothDataset(Dataset):
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
+
+        placeholder_string = self.placeholder_token
+        text = random.choice(self.templates).format(placeholder_string)
+        print(text)
         example["instance_prompt_ids"] = self.tokenizer(
-            self.instance_prompt,
+            text,
             padding="do_not_pad",
             truncation=True,
             max_length=self.tokenizer.model_max_length,
@@ -155,6 +221,19 @@ class PromptDataset(Dataset):
 
 
 logger = get_logger(__name__)
+
+
+def save_progress(text_encoder, placeholder_token_id, accelerator, args, save_path):
+    logger.info("Saving embeddings")
+    learned_embeds = (
+        accelerator.unwrap_model(text_encoder)
+        .get_input_embeddings()
+        .weight[placeholder_token_id]
+    )
+    print("Current Learned Embeddings: ", learned_embeds)
+    print("saved to ", save_path)
+    learned_embeds_dict = {args.placeholder_token: learned_embeds.detach().cpu()}
+    torch.save(learned_embeds_dict, save_path)
 
 
 def parse_args(input_args=None):
@@ -200,7 +279,7 @@ def parse_args(input_args=None):
         help="A folder containing the training data of class images.",
     )
     parser.add_argument(
-        "--instance_prompt",
+        "--placeholder_token",
         type=str,
         default=None,
         required=True,
@@ -321,6 +400,12 @@ def parse_args(input_args=None):
         help="Initial learning rate for text encoder (after the potential warmup period) to use.",
     )
     parser.add_argument(
+        "--learning_rate_ti",
+        type=float,
+        default=5e-4,
+        help="Initial learning rate for embedding of textual inversion (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
         "--scale_lr",
         action="store_true",
         default=False,
@@ -407,6 +492,31 @@ def parse_args(input_args=None):
         default=-1,
         help="For distributed training: local_rank",
     )
+    parser.add_argument(
+        "--learnable_property",
+        type=str,
+        default="object",
+        required=True,
+        help="Conecpt to learn : style or object?",
+    )
+    parser.add_argument(
+        "--initializer_token",
+        type=str,
+        default=None,
+        required=True,
+        help="A token to use as initializer word.",
+    )
+    parser.add_argument(
+        "--unfreeze_lora_step",
+        type=int,
+        default=500,
+        help="Save checkpoint every X updates steps.",
+    )
+    parser.add_argument(
+        "--just_ti",
+        action="store_true",
+        help="Debug to see just ti",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -433,6 +543,16 @@ def parse_args(input_args=None):
             )
 
     return args
+
+
+def freeze_params(params):
+    for param in params:
+        param.requires_grad = False
+
+
+def unfreeze_params(params):
+    for param in params:
+        param.requires_grad = True
 
 
 def main(args):
@@ -521,12 +641,29 @@ def main(args):
             args.tokenizer_name,
             revision=args.revision,
         )
+
     elif args.pretrained_model_name_or_path:
         tokenizer = CLIPTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="tokenizer",
             revision=args.revision,
         )
+    # Add the placeholder token in tokenizer
+    num_added_tokens = tokenizer.add_tokens(args.placeholder_token)
+    if num_added_tokens == 0:
+        raise ValueError(
+            f"The tokenizer already contains the token {args.placeholder_token}. Please pass a different"
+            " `placeholder_token` that is not already in the tokenizer."
+        )
+
+    # Convert the initializer_token, placeholder_token to ids
+    token_ids = tokenizer.encode(args.initializer_token, add_special_tokens=False)
+    # Check if initializer_token is a single token or a sequence of tokens
+    if len(token_ids) > 1:
+        raise ValueError("The initializer token must be a single token.")
+
+    initializer_token_id = token_ids[0]
+    placeholder_token_id = tokenizer.convert_tokens_to_ids(args.placeholder_token)
 
     # Load models and create wrapper for stable diffusion
     text_encoder = CLIPTextModel.from_pretrained(
@@ -534,6 +671,12 @@ def main(args):
         subfolder="text_encoder",
         revision=args.revision,
     )
+
+    text_encoder.resize_token_embeddings(len(tokenizer))
+    # Initialise the newly added placeholder token with the embeddings of the initializer token
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,
         subfolder=None if args.pretrained_vae_name_or_path else "vae",
@@ -553,22 +696,25 @@ def main(args):
         break
 
     vae.requires_grad_(False)
-    text_encoder.requires_grad_(False)
 
-    if args.train_text_encoder:
-        text_encoder_lora_params, _ = inject_trainable_lora(
-            text_encoder,
-            target_replace_module=["CLIPAttention"],
-            r=args.lora_rank,
-        )
-        for _up, _down in extract_lora_ups_down(
-            text_encoder, target_replace_module=["CLIPAttention"]
-        ):
-            print("Before training: text encoder First Layer lora up", _up.weight.data)
-            print(
-                "Before training: text encoder First Layer lora down", _down.weight.data
-            )
-            break
+    params_to_freeze = itertools.chain(
+        text_encoder.text_model.encoder.parameters(),
+        text_encoder.text_model.final_layer_norm.parameters(),
+        text_encoder.text_model.embeddings.position_embedding.parameters(),
+    )
+    freeze_params(params_to_freeze)
+
+    text_encoder_lora_params, _ = inject_trainable_lora(
+        text_encoder,
+        target_replace_module=["CLIPAttention"],
+        r=args.lora_rank,
+    )
+    for _up, _down in extract_lora_ups_down(
+        text_encoder, target_replace_module=["CLIPAttention"]
+    ):
+        print("Before training: text encoder First Layer lora up", _up.weight.data)
+        print("Before training: text encoder First Layer lora down", _down.weight.data)
+        break
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
@@ -596,26 +742,28 @@ def main(args):
     else:
         optimizer_class = torch.optim.AdamW
 
-    text_lr = (
-        args.learning_rate
-        if args.learning_rate_text is None
-        else args.learning_rate_text
-    )
+    params_to_optimize = [
+        {"params": itertools.chain(*unet_lora_params), "lr": args.learning_rate},
+        {
+            "params": itertools.chain(*text_encoder_lora_params),
+            "lr": args.learning_rate_text,
+        },
+        {
+            "params": text_encoder.get_input_embeddings().parameters(),
+            "lr": args.learning_rate_ti,
+        },
+    ]
 
-    params_to_optimize = (
-        [
-            {"params": itertools.chain(*unet_lora_params), "lr": args.learning_rate},
+    if args.just_ti:
+        params_to_optimize = [
             {
-                "params": itertools.chain(*text_encoder_lora_params),
-                "lr": text_lr,
-            },
+                "params": text_encoder.get_input_embeddings().parameters(),
+                "lr": args.learning_rate_ti,
+            }
         ]
-        if args.train_text_encoder
-        else itertools.chain(*unet_lora_params)
-    )
+
     optimizer = optimizer_class(
         params_to_optimize,
-        lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
@@ -625,9 +773,10 @@ def main(args):
         args.pretrained_model_name_or_path, subfolder="scheduler"
     )
 
-    train_dataset = DreamBoothDataset(
+    train_dataset = DreamBoothTiDataset(
         instance_data_root=args.instance_data_dir,
-        instance_prompt=args.instance_prompt,
+        placeholder_token=args.placeholder_token,
+        learnable_property=args.learnable_property,
         class_data_root=args.class_data_dir if args.with_prior_preservation else None,
         class_prompt=args.class_prompt,
         tokenizer=tokenizer,
@@ -686,20 +835,11 @@ def main(args):
         num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
     )
 
-    if args.train_text_encoder:
-        (
-            unet,
-            text_encoder,
-            optimizer,
-            train_dataloader,
-            lr_scheduler,
-        ) = accelerator.prepare(
-            unet, text_encoder, optimizer, train_dataloader, lr_scheduler
-        )
-    else:
-        unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-            unet, optimizer, train_dataloader, lr_scheduler
-        )
+    (
+        unet,
+        text_encoder,
+        train_dataloader,
+    ) = accelerator.prepare(unet, text_encoder, train_dataloader)
 
     weight_dtype = torch.float32
     if accelerator.mixed_precision == "fp16":
@@ -707,12 +847,9 @@ def main(args):
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
-    # Move text_encode and vae to gpu.
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
     # as these models are only used for inference, keeping weights in full precision is not required.
     vae.to(accelerator.device, dtype=weight_dtype)
-    if not args.train_text_encoder:
-        text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(
@@ -753,12 +890,20 @@ def main(args):
     global_step = 0
     last_save = 0
 
+    orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
+    # optimizer = accelerator.unwrap_model(optimizer)
+
     for epoch in range(args.num_train_epochs):
         unet.train()
-        if args.train_text_encoder:
-            text_encoder.train()
+        text_encoder.train()
 
+        # optimizer = accelerator.prepare(optimizer)
         for step, batch in enumerate(train_dataloader):
+
+            if global_step < args.unfreeze_lora_step:
+                optimizer.param_groups[0]["lr"] = 0.0
+                optimizer.param_groups[1]["lr"] = 0.0
+
             # Convert images to latent space
             latents = vae.encode(
                 batch["pixel_values"].to(dtype=weight_dtype)
@@ -827,10 +972,21 @@ def main(args):
                     else unet.parameters()
                 )
                 accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+
+            for param_group in optimizer.param_groups:
+                print(param_group["lr"])
+
             optimizer.step()
             lr_scheduler.step()
             progress_bar.update(1)
             optimizer.zero_grad()
+
+            # Let's make sure we don't update any embedding weights besides the newly added token
+            index_no_updates = torch.arange(len(tokenizer)) != placeholder_token_id
+            with torch.no_grad():
+                text_encoder.get_input_embeddings().weight[
+                    index_no_updates
+                ] = orig_embeds_params[index_no_updates]
 
             global_step += 1
 
@@ -863,12 +1019,12 @@ def main(args):
                     filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
                     print(f"save weights {filename_unet}, {filename_text_encoder}")
                     save_lora_weight(pipeline.unet, filename_unet)
-                    if args.train_text_encoder:
-                        save_lora_weight(
-                            pipeline.text_encoder,
-                            filename_text_encoder,
-                            target_replace_module=["CLIPAttention"],
-                        )
+
+                    save_lora_weight(
+                        pipeline.text_encoder,
+                        filename_text_encoder,
+                        target_replace_module=["CLIPAttention"],
+                    )
 
                     for _up, _down in extract_lora_ups_down(pipeline.unet):
                         print("First Unet Layer's Up Weight is now : ", _up.weight.data)
@@ -877,20 +1033,32 @@ def main(args):
                             _down.weight.data,
                         )
                         break
-                    if args.train_text_encoder:
-                        for _up, _down in extract_lora_ups_down(
-                            pipeline.text_encoder,
-                            target_replace_module=["CLIPAttention"],
-                        ):
-                            print(
-                                "First Text Encoder Layer's Up Weight is now : ",
-                                _up.weight.data,
-                            )
-                            print(
-                                "First Text Encoder Layer's Down Weight is now : ",
-                                _down.weight.data,
-                            )
-                            break
+
+                    for _up, _down in extract_lora_ups_down(
+                        pipeline.text_encoder,
+                        target_replace_module=["CLIPAttention"],
+                    ):
+                        print(
+                            "First Text Encoder Layer's Up Weight is now : ",
+                            _up.weight.data,
+                        )
+                        print(
+                            "First Text Encoder Layer's Down Weight is now : ",
+                            _down.weight.data,
+                        )
+                        break
+
+                    filename_ti = (
+                        f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.ti.pt"
+                    )
+
+                    save_progress(
+                        pipeline.text_encoder,
+                        placeholder_token_id,
+                        accelerator,
+                        args,
+                        filename_ti,
+                    )
 
                     last_save = global_step
 
@@ -915,17 +1083,12 @@ def main(args):
         print("\n\nLora TRAINING DONE!\n\n")
 
         save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
-        if args.train_text_encoder:
-            save_lora_weight(
-                pipeline.text_encoder,
-                args.output_dir + "/lora_weight.text_encoder.pt",
-                target_replace_module=["CLIPAttention"],
-            )
 
-        if args.push_to_hub:
-            repo.push_to_hub(
-                commit_message="End of training", blocking=False, auto_lfs_prune=True
-            )
+        save_lora_weight(
+            text_encoder,
+            args.output_dir + "/lora_weight.text_encoder.pt",
+            target_replace_module=["CLIPAttention"],
+        )
 
     accelerator.end_training()
 
