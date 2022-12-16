@@ -34,7 +34,6 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: List[str] = ["CrossAttention", "Attention"],
     r: int = 4,
-    loras = None # path to lora .pt
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -42,9 +41,6 @@ def inject_trainable_lora(
 
     require_grad_params = []
     names = []
-
-    if loras != None:
-        loras = torch.load(loras)
 
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -66,7 +62,7 @@ def inject_trainable_lora(
 
                     # switch the module
                     _module._modules[name] = _tmp
-                    
+
                     require_grad_params.append(
                         _module._modules[name].lora_up.parameters()
                     )
@@ -74,13 +70,10 @@ def inject_trainable_lora(
                         _module._modules[name].lora_down.parameters()
                     )
 
-                    if loras != None:
-                        _module._modules[name].lora_up.weight = loras.pop(0)
-                        _module._modules[name].lora_down.weight = loras.pop(0)
-
                     _module._modules[name].lora_up.weight.requires_grad = True
                     _module._modules[name].lora_down.weight.requires_grad = True
                     names.append(name)
+
     return require_grad_params, names
 
 
