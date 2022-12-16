@@ -34,7 +34,7 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: List[str] = ["CrossAttention", "Attention"],
     r: int = 4,
-    loras = None # path to lora .pt
+    loras=None,  # path to lora .pt
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -66,7 +66,7 @@ def inject_trainable_lora(
 
                     # switch the module
                     _module._modules[name] = _tmp
-                    
+
                     require_grad_params.append(
                         _module._modules[name].lora_up.parameters()
                     )
@@ -265,7 +265,7 @@ def _ti_lora_path(path: str) -> str:
 
 
 def load_learned_embed_in_clip(
-    learned_embeds_path, text_encoder, tokenizer, token=None
+    learned_embeds_path, text_encoder, tokenizer, token=None, idempotent=False
 ):
     loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
 
@@ -280,6 +280,9 @@ def load_learned_embed_in_clip(
     token = token if token is not None else trained_token
     num_added_tokens = tokenizer.add_tokens(token)
     i = 1
+    if num_added_tokens == 0 and idempotent:
+        return token
+
     while num_added_tokens == 0:
         print(f"The tokenizer already contains the token {token}.")
         token = f"{token[:-1]}-{i}>"
@@ -304,6 +307,7 @@ def patch_pipe(
     r: int = 4,
     patch_text=False,
     patch_ti=False,
+    idempotent_token=True,
 ):
 
     ti_path = _ti_lora_path(unet_path)
@@ -343,5 +347,9 @@ def patch_pipe(
             )
     if patch_ti:
         token = load_learned_embed_in_clip(
-            ti_path, pipe.text_encoder, pipe.tokenizer, token
+            ti_path,
+            pipe.text_encoder,
+            pipe.tokenizer,
+            token,
+            idempotent=idempotent_token,
         )
