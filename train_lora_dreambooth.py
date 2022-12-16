@@ -413,6 +413,22 @@ def parse_args(input_args=None):
         default=-1,
         help="For distributed training: local_rank",
     )
+    parser.add_argument(
+        "--resume_unet",
+        type=str,
+        default=None,
+        help=(
+            "File path for unet lora to resume training."
+        )
+    )
+    parser.add_argument(
+        "--resume_text_encoder",
+        type=str,
+        default=None,
+        help=(
+            "File path for text encoder lora to resume training."
+        )
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -576,7 +592,7 @@ def main(args):
         revision=args.revision,
     )
     unet.requires_grad_(False)
-    unet_lora_params, _ = inject_trainable_lora(unet, r=args.lora_rank)
+    unet_lora_params, _ = inject_trainable_lora(unet, r=args.lora_rank, loras=args.resume_unet)
 
     for _up, _down in extract_lora_ups_down(unet):
         print("Before training: Unet First Layer lora up", _up.weight.data)
@@ -590,6 +606,7 @@ def main(args):
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder, target_replace_module=["CLIPAttention"],
              r=args.lora_rank,
+             loras=args.resume_text_encoder,
         )
         for _up, _down in extract_lora_ups_down(
             text_encoder, target_replace_module=["CLIPAttention"]
