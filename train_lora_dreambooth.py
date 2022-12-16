@@ -922,7 +922,7 @@ def main(args):
             if global_step >= args.max_train_steps:
                 break
 
-            accelerator.wait_for_everyone()
+    accelerator.wait_for_everyone()
 
     # Create the pipeline using using the trained modules and save it.
     if accelerator.is_main_process:
