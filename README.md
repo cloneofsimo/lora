@@ -284,7 +284,7 @@ And the following is only using Text Encoder LoRA:
 </p>
 <!-- #endregion -->
 
-So they learnt different aspect of the dataset, but they are not mutually exclusive. You can use both of them to get better results, and tune them seperately to get even better results.
+So they learnt different aspect of the dataset, but they are not mutually exclusive. You can use both of them to get better results, and tune them separately to get even better results.
 
 With LoRA Text Encoder, Unet, all the schedulers, guidance scale, negative prompt etc. etc., you have so much to play around with to get the best result you want. For example, with $\alpha_{unet} = 0.6$, $\alpha_{text} = 0.9$, you get a better result compared to $\alpha_{unet} = 1.0$, $\alpha_{text} = 1.0$ (default). Checkout below:
 
