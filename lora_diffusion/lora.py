@@ -34,7 +34,7 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: List[str] = ["CrossAttention", "Attention"],
     r: int = 4,
-    loras = None # path to lora .pt
+    loras=None,  # path to lora .pt
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -66,7 +66,7 @@ def inject_trainable_lora(
 
                     # switch the module
                     _module._modules[name] = _tmp
-                    
+
                     require_grad_params.append(
                         _module._modules[name].lora_up.parameters()
                     )
@@ -265,7 +265,7 @@ def _ti_lora_path(path: str) -> str:
 
 
 def load_learned_embed_in_clip(
-    learned_embeds_path, text_encoder, tokenizer, token=None
+    learned_embeds_path, text_encoder, tokenizer, token=None, idempotent=False
 ):
     loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
 
@@ -280,6 +280,9 @@ def load_learned_embed_in_clip(
     token = token if token is not None else trained_token
     num_added_tokens = tokenizer.add_tokens(token)
     i = 1
+    if num_added_tokens == 0 and idempotent:
+        return token
+
     while num_added_tokens == 0:
         print(f"The tokenizer already contains the token {token}.")
         token = f"{token[:-1]}-{i}>"
@@ -299,12 +302,16 @@ def load_learned_embed_in_clip(
 def patch_pipe(
     pipe,
     unet_path,
-    token,
-    alpha: float = 1.0,
+    token: str,
     r: int = 4,
+    patch_unet=True,
     patch_text=False,
     patch_ti=False,
+    idempotent_token=True,
 ):
+    assert (
+        len(token) > 0
+    ), "Token cannot be empty. Input token non-empty token like <s>."
 
     ti_path = _ti_lora_path(unet_path)
     text_path = _text_lora_path(unet_path)
@@ -319,13 +326,16 @@ def patch_pipe(
     for _module in pipe.text_encoder.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
             text_encoder_has_lora = True
+    if patch_unet:
+        print("LoRA : Patching Unet")
 
-    if not unet_has_lora:
-        monkeypatch_lora(pipe.unet, torch.load(unet_path), r=r)
-    else:
-        monkeypatch_replace_lora(pipe.unet, torch.load(unet_path), r=r)
+        if not unet_has_lora:
+            monkeypatch_lora(pipe.unet, torch.load(unet_path), r=r)
+        else:
+            monkeypatch_replace_lora(pipe.unet, torch.load(unet_path), r=r)
 
     if patch_text:
+        print("LoRA : Patching text encoder")
         if not text_encoder_has_lora:
             monkeypatch_lora(
                 pipe.text_encoder,
@@ -342,6 +352,11 @@ def patch_pipe(
                 r=r,
             )
     if patch_ti:
+        print("LoRA : Patching token input")
         token = load_learned_embed_in_clip(
-            ti_path, pipe.text_encoder, pipe.tokenizer, token
+            ti_path,
+            pipe.text_encoder,
+            pipe.tokenizer,
+            token,
+            idempotent=idempotent_token,
         )
