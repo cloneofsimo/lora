@@ -9,6 +9,7 @@ import os
 import inspect
 from pathlib import Path
 from typing import Optional
+import random
 
 import torch
 import torch.nn.functional as F
@@ -99,6 +100,19 @@ imagenet_style_templates_small = [
 ]
 
 
+def _randomset(lis):
+    ret = []
+    for i in range(len(lis)):
+        if random.random() < 0.5:
+            ret.append(lis[i])
+    return ret
+
+
+def _shuffle(lis):
+
+    return random.sample(lis, len(lis))
+
+
 class DreamBoothTiDataset(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -110,6 +124,7 @@ class DreamBoothTiDataset(Dataset):
         instance_data_root,
         learnable_property,
         placeholder_token,
+        stochastic_attribute,
         tokenizer,
         class_data_root=None,
         class_prompt=None,
@@ -129,6 +144,7 @@ class DreamBoothTiDataset(Dataset):
         self.num_instance_images = len(self.instance_images_path)
 
         self.placeholder_token = placeholder_token
+        self.stochastic_attribute = stochastic_attribute.split(",")
 
         self.templates = (
             imagenet_style_templates_small
@@ -159,6 +175,7 @@ class DreamBoothTiDataset(Dataset):
                 transforms.ColorJitter(0.2, 0.1)
                 if color_jitter
                 else transforms.Lambda(lambda x: x),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
@@ -176,8 +193,13 @@ class DreamBoothTiDataset(Dataset):
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
 
-        placeholder_string = self.placeholder_token
-        text = random.choice(self.templates).format(placeholder_string)
+        text = random.choice(self.templates).format(
+            ", ".join(
+                [self.placeholder_token]
+                + _shuffle(_randomset(self.stochastic_attribute))
+            )
+        )
+        print(text)
         example["instance_prompt_ids"] = self.tokenizer(
             text,
             padding="do_not_pad",
@@ -279,6 +301,13 @@ def parse_args(input_args=None):
     )
     parser.add_argument(
         "--placeholder_token",
+        type=str,
+        default=None,
+        required=True,
+        help="The prompt with identifier specifying the instance",
+    )
+    parser.add_argument(
+        "--stochastic_attribute",
         type=str,
         default=None,
         required=True,
@@ -775,6 +804,7 @@ def main(args):
     train_dataset = DreamBoothTiDataset(
         instance_data_root=args.instance_data_dir,
         placeholder_token=args.placeholder_token,
+        stochastic_attribute=args.stochastic_attribute,
         learnable_property=args.learnable_property,
         class_data_root=args.class_data_dir if args.with_prior_preservation else None,
         class_prompt=args.class_prompt,
@@ -890,23 +920,21 @@ def main(args):
     last_save = 0
 
     orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
-    # optimizer = accelerator.unwrap_model(optimizer)
 
     for epoch in range(args.num_train_epochs):
         unet.train()
         text_encoder.train()
 
-        # optimizer = accelerator.prepare(optimizer)
         for step, batch in enumerate(train_dataloader):
-            
+
             # freeze unet and text encoder during ti training
             if global_step < args.unfreeze_lora_step:
                 optimizer.param_groups[0]["lr"] = 0.0
                 optimizer.param_groups[1]["lr"] = 0.0
-            else: # begin learning with unet and text encoder
+            else:  # begin learning with unet and text encoder
                 optimizer.param_groups[0]["lr"] = args.learning_rate
-                optimizer.param_groups[1]["lr"] = args.learning_rate_text    
-                optimizer.param_groups[2]["lr"] = 0.0 # stop learning ti        
+                optimizer.param_groups[1]["lr"] = args.learning_rate_text
+                optimizer.param_groups[2]["lr"] = 0.0  # stop learning ti
 
             # Convert images to latent space
             latents = vae.encode(
@@ -1000,10 +1028,14 @@ def main(args):
                         # we will crash. pass this, but only to newer versions of accelerate. fixes
                         # https://github.com/huggingface/diffusers/issues/1566
                         accepts_keep_fp32_wrapper = "keep_fp32_wrapper" in set(
-                            inspect.signature(accelerator.unwrap_model).parameters.keys()
+                            inspect.signature(
+                                accelerator.unwrap_model
+                            ).parameters.keys()
                         )
                         extra_args = (
-                            {"keep_fp32_wrapper": True} if accepts_keep_fp32_wrapper else {}
+                            {"keep_fp32_wrapper": True}
+                            if accepts_keep_fp32_wrapper
+                            else {}
                         )
                         pipeline = StableDiffusionPipeline.from_pretrained(
                             args.pretrained_model_name_or_path,
@@ -1028,7 +1060,10 @@ def main(args):
                         )
 
                         for _up, _down in extract_lora_ups_down(pipeline.unet):
-                            print("First Unet Layer's Up Weight is now : ", _up.weight.data)
+                            print(
+                                "First Unet Layer's Up Weight is now : ",
+                                _up.weight.data,
+                            )
                             print(
                                 "First Unet Layer's Down Weight is now : ",
                                 _down.weight.data,
@@ -1049,9 +1084,7 @@ def main(args):
                             )
                             break
 
-                        filename_ti = (
-                            f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.ti.pt"
-                        )
+                        filename_ti = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.ti.pt"
 
                         save_progress(
                             pipeline.text_encoder,
@@ -1063,7 +1096,10 @@ def main(args):
 
                         last_save = global_step
 
-                logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+                logs = {
+                    "loss": loss.detach().item(),
+                    "lr": lr_scheduler.get_last_lr()[0],
+                }
                 progress_bar.set_postfix(**logs)
                 accelerator.log(logs, step=global_step)
 
