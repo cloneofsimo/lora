@@ -32,7 +32,7 @@ class LoraInjectedLinear(nn.Module):
 
 def inject_trainable_lora(
     model: nn.Module,
-    target_replace_module: List[str] = ["CrossAttention", "Attention"],
+    target_replace_module: List[str] = ["CrossAttention", "Attention", "GEGLU"],
     r: int = 4,
     loras=None,  # path to lora .pt
 ):
@@ -84,7 +84,9 @@ def inject_trainable_lora(
     return require_grad_params, names
 
 
-def extract_lora_ups_down(model, target_replace_module=["CrossAttention", "Attention"]):
+def extract_lora_ups_down(
+    model, target_replace_module=["CrossAttention", "Attention", "GEGLU"]
+):
 
     loras = []
 
@@ -99,7 +101,9 @@ def extract_lora_ups_down(model, target_replace_module=["CrossAttention", "Atten
 
 
 def save_lora_weight(
-    model, path="./lora.pt", target_replace_module=["CrossAttention", "Attention"]
+    model,
+    path="./lora.pt",
+    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
 ):
     weights = []
     for _up, _down in extract_lora_ups_down(
@@ -124,7 +128,10 @@ def save_lora_as_json(model, path="./lora.json"):
 
 
 def weight_apply_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"], alpha=1.0
+    model,
+    loras,
+    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
+    alpha=1.0,
 ):
 
     for _module in model.modules():
@@ -145,7 +152,10 @@ def weight_apply_lora(
 
 
 def monkeypatch_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"], r: int = 4
+    model,
+    loras,
+    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
+    r: int = 4,
 ):
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -182,7 +192,10 @@ def monkeypatch_lora(
 
 
 def monkeypatch_replace_lora(
-    model, loras, target_replace_module=["CrossAttention", "Attention"], r: int = 4
+    model,
+    loras,
+    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
+    r: int = 4,
 ):
     for _module in model.modules():
         if _module.__class__.__name__ in target_replace_module:
@@ -221,7 +234,7 @@ def monkeypatch_replace_lora(
 def monkeypatch_add_lora(
     model,
     loras,
-    target_replace_module=["CrossAttention", "Attention"],
+    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
     alpha: float = 1.0,
     beta: float = 1.0,
 ):
@@ -280,15 +293,16 @@ def load_learned_embed_in_clip(
     token = token if token is not None else trained_token
     num_added_tokens = tokenizer.add_tokens(token)
     i = 1
-    if num_added_tokens == 0 and idempotent:
-        return token
-
-    while num_added_tokens == 0:
+    if not idempotent:
+        while num_added_tokens == 0:
+            print(f"The tokenizer already contains the token {token}.")
+            token = f"{token[:-1]}-{i}>"
+            print(f"Attempting to add the token {token}.")
+            num_added_tokens = tokenizer.add_tokens(token)
+            i += 1
+    elif num_added_tokens == 0 and idempotent:
         print(f"The tokenizer already contains the token {token}.")
-        token = f"{token[:-1]}-{i}>"
-        print(f"Attempting to add the token {token}.")
-        num_added_tokens = tokenizer.add_tokens(token)
-        i += 1
+        print(f"Replacing {token} embedding.")
 
     # resize the token embeddings
     text_encoder.resize_token_embeddings(len(tokenizer))
