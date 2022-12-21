@@ -78,10 +78,12 @@ class DreamBoothTiDataset(Dataset):
         size=512,
         center_crop=False,
         color_jitter=False,
+        resize=False,
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
+        self.resize = resize
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -109,7 +111,9 @@ class DreamBoothTiDataset(Dataset):
             [
                 transforms.Resize(
                     size, interpolation=transforms.InterpolationMode.BILINEAR
-                ),
+                ) 
+                if resize
+                else transforms.Lambda(lambda x: x),
                 transforms.CenterCrop(size)
                 if center_crop
                 else transforms.RandomCrop(size),
@@ -482,6 +486,13 @@ def parse_args(input_args=None):
         action="store_true",
         help="Debug to see just ti",
     )
+    parser.add_argument(
+        "--resize",
+        type=bool,
+        default=True,
+        required=False,
+        help="Should images be resized to --resolution before training?"
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -749,6 +760,7 @@ def main(args):
         size=args.resolution,
         center_crop=args.center_crop,
         color_jitter=args.color_jitter,
+        resize=args.resize,
     )
 
     def collate_fn(examples):
