@@ -926,7 +926,6 @@ def main(args):
         text_encoder.train()
 
         for step, batch in enumerate(train_dataloader):
-
             # freeze unet and text encoder during ti training
             if global_step < args.unfreeze_lora_step:
                 optimizer.param_groups[0]["lr"] = 0.0
