@@ -35,11 +35,11 @@
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
-- Get insanely small end result (3MB for just unet, 6MB for both unet + clip), easy to share and download.
+- Get insanely small end result (3MB for just unet, 4MB for both unet + clip + token embedding), easy to share and download.
 - Easy to use, compatible with `diffusers`
 - Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints + Build recipes by merging LoRAs together
-- Fine-tune both CLIP & Unet to gain better results.
+- Pipeline to fine-tune CLIP + Unet + token to gain better results.
 
 # Web Demo
 
@@ -48,6 +48,12 @@
 - Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
+
+### 2022/12/22
+
+- Pivotal Tuning now available with
+
+### 2022/12/10
 
 - **You can now fine-tune text_encoder as well! Enabled with simple `--train_text_encoder`**
 - **Converting to CKPT format for A1111's repo consumption!** (Thanks to [jachiam](https://github.com/jachiam)'s conversion script)
@@ -70,6 +76,21 @@ Where we can further decompose $\Delta W$ into low-rank matrices : $\Delta W = A
 This is the key idea of LoRA. We can then fine-tune $A$ and $B$ instead of $W$. In the end, you get an insanely small model as $A$ and $B$ are much smaller than $W$.
 
 Also, not all of the parameters need tuning: they found that often, $Q, K, V, O$ (i.e., attention layer) of the transformer model is enough to tune. (This is also the reason why the end result is so small). This repo will follow the same idea.
+
+Now, how would we actually use this to update diffusion model? First, we will use Stable-diffusion from [stability-ai](https://stability.ai/). Their model is nicely ported through Huggingface API, so this repo has built various fine-tuning methods around them. In detail, there are three subtle but important distictions in methods to make this work out.
+
+1. [Dreambooth](https://arxiv.org/abs/2208.12242)
+
+First, there is LoRA applied to Dreambooth. The idea is to use prior-preservation class images to regularize the training process, and use low-occuring tokens. This will keep the model's generalization capability while keeping high fidelity. If you turn off prior preservation, and train text encoder embedding as well, it will become naive fine tuning.
+
+2. [Textual Inversion](https://arxiv.org/abs/2208.01618)
+
+Second, there is Textual inversion. There is no room to apply LoRA here, but it is worth mensioning. The idea is to instantiate new token, and learn the token embedding via gradient descent. This is a very powerful method, and it is worth trying out if your use case is not focused on fidelity but rather on inverting conceptual ideas.
+
+3. [Pivotal Tuning](https://arxiv.org/abs/2106.05744)
+
+Last method (although originally proposed for GANs) takes the best of both worlds to further benefit. Wken combined together, this can be implemented as a strict generalization of both methods.
+Simply you apply textual inversion to get a matching token embedding. Then, you use the token embedding + prior-preserving class image to fine-tune the model. This two-fold nature make this strict generalization of both methods.
 
 Enough of the lengthy introduction, let's get to the code.
 
@@ -102,7 +123,7 @@ optimizer = optim.Adam(
 )
 ```
 
-An example of this can be found in `train_lora_dreambooth.py`. Run this example with
+A working example of this, applied on [Dreambooth](https://arxiv.org/abs/2208.12242) can be found in `train_lora_dreambooth.py`. Run this example with
 
 ```bash
 run_lora_db.sh
@@ -318,3 +339,47 @@ TODOS
 - Adaptor-guidance
 - Time-aware fine-tuning.
 - Test alpha scheduling. I think it will be meaningful.
+
+# References
+
+This work was heavily influenced by, and originated by these awesome researches. I'm just applying them here.
+
+```bibtex
+@article{roich2022pivotal,
+  title={Pivotal tuning for latent-based editing of real images},
+  author={Roich, Daniel and Mokady, Ron and Bermano, Amit H and Cohen-Or, Daniel},
+  journal={ACM Transactions on Graphics (TOG)},
+  volume={42},
+  number={1},
+  pages={1--13},
+  year={2022},
+  publisher={ACM New York, NY}
+}
+```
+
+```bibtex
+@article{ruiz2022dreambooth,
+  title={Dreambooth: Fine tuning text-to-image diffusion models for subject-driven generation},
+  author={Ruiz, Nataniel and Li, Yuanzhen and Jampani, Varun and Pritch, Yael and Rubinstein, Michael and Aberman, Kfir},
+  journal={arXiv preprint arXiv:2208.12242},
+  year={2022}
+}
+```
+
+```bibtex
+@article{gal2022image,
+  title={An image is worth one word: Personalizing text-to-image generation using textual inversion},
+  author={Gal, Rinon and Alaluf, Yuval and Atzmon, Yuval and Patashnik, Or and Bermano, Amit H and Chechik, Gal and Cohen-Or, Daniel},
+  journal={arXiv preprint arXiv:2208.01618},
+  year={2022}
+}
+```
+
+```
+@article{hu2021lora,
+  title={Lora: Low-rank adaptation of large language models},
+  author={Hu, Edward J and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},
+  journal={arXiv preprint arXiv:2106.09685},
+  year={2021}
+}
+```
