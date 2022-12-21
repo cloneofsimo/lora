@@ -374,3 +374,22 @@ def patch_pipe(
             token,
             idempotent=idempotent_token,
         )
+
+
+@torch.no_grad()
+def inspect_lora(model, target_replace_module=["CrossAttention", "Attention", "GEGLU"]):
+
+    fnorm = {k: [] for k in target_replace_module}
+
+    for _module in model.modules():
+        if _module.__class__.__name__ in target_replace_module:
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+                    ups = _module._modules[name].lora_up.weight
+                    downs = _module._modules[name].lora_down.weight
+
+                    wght: torch.Tensor = downs @ ups
+                    fnorm[name].append(wght.flatten().pow(2).mean().item())
+
+    for k, v in fnorm.items():
+        print(f"F norm on Current LoRA of {k} : {v}")
