@@ -51,7 +51,10 @@
 
 ### 2022/12/22
 
-- Pivotal Tuning now available with
+- Pivotal Tuning now available with `run_lorpt.sh`
+- More Utilities added, such as datasets, `patch_pipe` function to patch CLIP, Unet, Token all at once.
+- Adjustable Ranks, Fine-tuning Feed-forward layers.
+- More example notebooks added.
 
 ### 2022/12/10
 
@@ -342,7 +345,7 @@ TODOS
 
 # References
 
-This work was heavily influenced by, and originated by these awesome researches. I'm just applying them here.
+This work was heavily influenced by, and originated from these awesome researches. I'm just applying them here.
 
 ```bibtex
 @article{roich2022pivotal,
@@ -375,7 +378,7 @@ This work was heavily influenced by, and originated by these awesome researches.
 }
 ```
 
-```
+```bibtex
 @article{hu2021lora,
   title={Lora: Low-rank adaptation of large language models},
   author={Hu, Edward J and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},
