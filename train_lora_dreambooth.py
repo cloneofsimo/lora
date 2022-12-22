@@ -31,9 +31,10 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from lora_diffusion import (
+    extract_lora_ups_down,
     inject_trainable_lora,
     save_lora_weight,
-    extract_lora_ups_down,
+    save_safeloras,
 )
 
 from torch.utils.data import Dataset
@@ -947,6 +948,14 @@ def main(args):
             repo.push_to_hub(
                 commit_message="End of training", blocking=False, auto_lfs_prune=True
             )
+
+        save_safeloras(
+            {
+                "unet": (pipeline.unet, {"CrossAttention", "Attention", "GEGLU"}),
+                "text_encoder": (pipeline.text_encoder, {"CLIPAttention"}),
+            },
+            args.output_dir + "/lora_weight.safetensors",
+        )
 
     accelerator.end_training()
 
