@@ -36,27 +36,55 @@ TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
 DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
 
 
-def _find_modules(
+def _find_children(
     model,
-    target_replace_module=DEFAULT_TARGET_REPLACE,
     search_class: type[nn.Module] | UnionType = nn.Linear,
 ):
+    """
+    Find all modules of a certain class (or union of classes).
+
+    Returns all matching modules, along with the parent of those moduless and the
+    names they are referenced by.
+    """
+    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    for parent in model.modules():
+        for name, module in parent.named_children():
+            if isinstance(module, search_class):
+                yield parent, name, module
+
+
+def _find_modules(
+    model,
+    ancestor_class: set[str] = DEFAULT_TARGET_REPLACE,
+    search_class: type[nn.Module] | UnionType = nn.Linear,
+    exclude_children_of: type[nn.Module] | UnionType = LoraInjectedLinear,
+):
+    """
+    Find all modules of a certain class (or union of classes) that are direct or
+    indirect descendants of other modules of a certain class (or union of classes).
+
+    Returns all matching modules, along with the parent of those moduless and the
+    names they are referenced by.
+    """
+
     # Get the targets we should replace all linears under
-    targets = (
+    ancestors = (
         module
         for module in model.modules()
-        if module.__class__.__name__ in target_replace_module
+        if module.__class__.__name__ in ancestor_class
     )
 
     # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
-    for target in targets:
-        for fullname, module in target.named_modules():
+    for ancestor in ancestors:
+        for fullname, module in ancestor.named_modules():
             if isinstance(module, search_class):
                 # Find the direct parent if this is a descendant, not a child, of target
-                *path, name = fullname.rsplit(".", 1)
-                parent = target.get_submodule(path[0]) if path else target
+                *path, name = fullname.split(".")
+                parent = ancestor
+                while path:
+                    parent = parent.get_submodule(path.pop(0))
                 # Skip this linear if it's a child of a LoraInjectedLinear
-                if isinstance(parent, LoraInjectedLinear):
+                if exclude_children_of and isinstance(parent, exclude_children_of):
                     continue
                 # Otherwise, yield it
                 yield parent, name, module
@@ -280,15 +308,11 @@ def monkeypatch_or_replace_lora(
         _module._modules[name].to(weight.device)
 
 
-def monkeypatch_remove_lora(model, target_replace_module=DEFAULT_TARGET_REPLACE):
-    for _module, name, _child_module in _find_modules(
-        model, target_replace_module, search_class=LoraInjectedLinear
+def monkeypatch_remove_lora(model):
+    for _module, name, _child_module in _find_children(
+        model, search_class=LoraInjectedLinear
     ):
-        _source = (
-            _child_module.linear
-            if isinstance(_child_module, LoraInjectedLinear)
-            else _child_module
-        )
+        _source = _child_module.linear
         weight, bias = _source.weight, _source.bias
 
         _tmp = nn.Linear(_source.in_features, _source.out_features, bias is not None)
