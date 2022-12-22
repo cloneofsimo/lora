@@ -185,6 +185,13 @@ def save_safeloras(
     modelmap: dict[str, tuple[nn.Module, set[str]]] = {},
     outpath="./lora.safetensors",
 ):
+    """
+    Saves the Lora from multiple modules in a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (module, target_replace_module)
+    }
+    """
     weights = {}
     metadata = {}
 
@@ -210,6 +217,13 @@ def convert_loras_to_safeloras(
     modelmap: dict[str, tuple[str, set[str], int]] = {},
     outpath="./lora.safetensors",
 ):
+    """
+    Converts the Lora from multiple pytorch .pt files into a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (pytorch_model_path, target_replace_module, rank)
+    }
+    """
 
     weights = {}
     metadata = {}
@@ -236,7 +250,21 @@ def convert_loras_to_safeloras(
     save_file(weights, outpath, metadata)
 
 
-def parse_safeloras(safeloras):
+def parse_safeloras(
+    safeloras,
+) -> dict[str, tuple[list[nn.parameter.Parameter], list[int], list[str]]]:
+    """
+    Converts a loaded safetensor file that contains a set of module Loras
+    into Parameters and other information
+
+    Output is a dictionary of {
+        "module name": (
+            [list of weights],
+            [list of ranks],
+            target_replacement_modules
+        )
+    }
+    """
     loras = {}
 
     import json
