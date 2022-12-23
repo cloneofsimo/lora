@@ -92,7 +92,7 @@ Second, there is Textual inversion. There is no room to apply LoRA here, but it 
 
 3. [Pivotal Tuning](https://arxiv.org/abs/2106.05744)
 
-Last method (although originally proposed for GANs) takes the best of both worlds to further benefit. Wken combined together, this can be implemented as a strict generalization of both methods.
+Last method (although originally proposed for GANs) takes the best of both worlds to further benefit. When combined together, this can be implemented as a strict generalization of both methods.
 Simply you apply textual inversion to get a matching token embedding. Then, you use the token embedding + prior-preserving class image to fine-tune the model. This two-fold nature make this strict generalization of both methods.
 
 Enough of the lengthy introduction, let's get to the code.
