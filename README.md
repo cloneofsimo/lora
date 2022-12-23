@@ -110,7 +110,7 @@ pip install git+https://github.com/cloneofsimo/lora.git
 Basic usage is as follows: prepare sets of $A, B$ matrices in an unet model, and fine-tune them.
 
 ```python
-from lora_diffusion import inject_trainable_lora, extract_lora_up_downs
+from lora_diffusion import inject_trainable_lora, extract_lora_ups_down
 
 ...
 
