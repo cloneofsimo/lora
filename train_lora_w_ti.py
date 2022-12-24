@@ -167,24 +167,41 @@ class DreamBoothTiDataset(Dataset):
         else:
             self.class_data_root = None
 
-        self.image_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    size, interpolation=transforms.InterpolationMode.BILINEAR
-                ) 
-                if resize
-                else transforms.Lambda(lambda x: x),
-                transforms.CenterCrop(size)
-                if center_crop
-                else transforms.RandomCrop(size),
-                transforms.ColorJitter(0.2, 0.1)
-                if color_jitter
-                else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
+        if resize:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.Resize(
+                        size, interpolation=transforms.InterpolationMode.BILINEAR
+                    ),
+                    transforms.CenterCrop(size)
+                    if center_crop
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
+        else:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.CenterCrop(size)
+                    if center_crop
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
 
     def __len__(self):
         return self._length
