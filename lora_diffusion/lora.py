@@ -1,4 +1,5 @@
 import math
+from itertools import groupby
 from types import UnionType
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -180,6 +181,135 @@ def save_lora_as_json(model, path="./lora.json"):
         json.dump(weights, f)
 
 
+def save_safeloras(
+    modelmap: dict[str, tuple[nn.Module, set[str]]] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Saves the Lora from multiple modules in a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (module, target_replace_module)
+    }
+    """
+    weights = {}
+    metadata = {}
+
+    import json
+
+    from safetensors.torch import save_file
+
+    for name, (model, target_replace_module) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+
+        for i, (_up, _down) in enumerate(
+            extract_lora_ups_down(model, target_replace_module)
+        ):
+            metadata[f"{name}:{i}:rank"] = str(_down.out_features)
+            weights[f"{name}:{i}:up"] = _up.weight
+            weights[f"{name}:{i}:down"] = _down.weight
+
+    print(f"Saving weights to {outpath} with metadata", metadata)
+    save_file(weights, outpath, metadata)
+
+
+def convert_loras_to_safeloras(
+    modelmap: dict[str, tuple[str, set[str], int]] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Converts the Lora from multiple pytorch .pt files into a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (pytorch_model_path, target_replace_module, rank)
+    }
+    """
+
+    weights = {}
+    metadata = {}
+
+    import json
+
+    from safetensors.torch import save_file
+
+    for name, (path, target_replace_module, r) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+
+        lora = torch.load(path)
+        for i, weight in enumerate(lora):
+            is_up = i % 2 == 0
+            i = i // 2
+
+            if is_up:
+                metadata[f"{name}:{i}:rank"] = str(r)
+                weights[f"{name}:{i}:up"] = weight
+            else:
+                weights[f"{name}:{i}:down"] = weight
+
+    print(f"Saving weights to {outpath} with metadata", metadata)
+    save_file(weights, outpath, metadata)
+
+
+def parse_safeloras(
+    safeloras,
+) -> dict[str, tuple[list[nn.parameter.Parameter], list[int], list[str]]]:
+    """
+    Converts a loaded safetensor file that contains a set of module Loras
+    into Parameters and other information
+
+    Output is a dictionary of {
+        "module name": (
+            [list of weights],
+            [list of ranks],
+            target_replacement_modules
+        )
+    }
+    """
+    loras = {}
+
+    import json
+
+    metadata = safeloras.metadata()
+
+    get_name = lambda k: k.split(":")[0]
+
+    keys = list(safeloras.keys())
+    keys.sort(key=get_name)
+
+    for name, module_keys in groupby(keys, get_name):
+        # Extract the targets
+        target = json.loads(metadata[name])
+
+        # Build the result lists - Python needs us to preallocate lists to insert into them
+        module_keys = list(module_keys)
+        ranks = [None] * (len(module_keys) // 2)
+        weights = [None] * len(module_keys)
+
+        for key in module_keys:
+            # Split the model name and index out of the key
+            _, idx, direction = key.split(":")
+            idx = int(idx)
+
+            # Add the rank
+            ranks[idx] = json.loads(metadata[f"{name}:{idx}:rank"])
+
+            # Insert the weight into the list
+            idx = idx * 2 + (1 if direction == "down" else 0)
+            weights[idx] = nn.parameter.Parameter(safeloras.get_tensor(key))
+
+        loras[name] = (weights, ranks, target)
+
+    return loras
+
+
+def load_safeloras(path, device="cpu"):
+
+    from safetensors.torch import safe_open
+
+    safeloras = safe_open(path, framework="pt", device=device)
+    return parse_safeloras(safeloras)
+
+
 def weight_apply_lora(
     model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, alpha=1.0
 ):
@@ -268,7 +398,7 @@ def monkeypatch_replace_lora(
 
 
 def monkeypatch_or_replace_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int | list[int] = 4
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=nn.Linear | LoraInjectedLinear
@@ -285,7 +415,7 @@ def monkeypatch_or_replace_lora(
             _source.in_features,
             _source.out_features,
             _source.bias is not None,
-            r=r,
+            r=r.pop(0) if isinstance(r, list) else r,
         )
         _tmp.linear.weight = weight
 
@@ -306,6 +436,19 @@ def monkeypatch_or_replace_lora(
         )
 
         _module._modules[name].to(weight.device)
+
+
+def monkeypatch_or_replace_safeloras(models, safeloras):
+    loras = parse_safeloras(safeloras)
+
+    for name, (lora, ranks, target) in loras.items():
+        model = getattr(models, name, None)
+
+        if not model:
+            print(f"No model provided for {name}, contained in Lora")
+            continue
+
+        monkeypatch_or_replace_lora(model, lora, target, ranks)
 
 
 def monkeypatch_remove_lora(model):
