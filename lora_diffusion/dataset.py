@@ -188,7 +188,6 @@ class PivotalTuningDatasetCapation(Dataset):
     def __init__(
         self,
         instance_data_root,
-        learnable_property,
         placeholder_token,
         stochastic_attribute,
         tokenizer,
@@ -210,7 +209,9 @@ class PivotalTuningDatasetCapation(Dataset):
         self.num_instance_images = len(self.instance_images_path)
 
         self.placeholder_token = placeholder_token
-        self.stochastic_attribute = stochastic_attribute.split(",")
+        self.stochastic_attribute_split = (
+            None if stochastic_attribute is None else stochastic_attribute.split(",")
+        )
 
         self._length = self.num_instance_images
 
@@ -253,7 +254,11 @@ class PivotalTuningDatasetCapation(Dataset):
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
 
-        text = self.instance_images_path[index % self.num_instance_images].stem
+        text = self.instance_images_path[index % self.num_instance_images].stem + (
+            ", ".join(_randomset(self.stochastic_attribute_split))
+            if self.stochastic_attribute_split
+            else ""
+        )
 
         example["instance_prompt_ids"] = self.tokenizer(
             text,
