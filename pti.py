@@ -176,7 +176,7 @@ def loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype):
 
 
 @torch.autocast("cuda")
-def perform_inversion(
+def train_inversion(
     unet,
     vae,
     text_encoder,
@@ -228,6 +228,9 @@ def perform_inversion(
                     save_lora=False,
                 )
 
+            if global_step >= num_steps:
+                return
+
 
 @torch.autocast("cuda")
 def perform_tuning(
@@ -268,6 +271,25 @@ def perform_tuning(
                     placeholder_token=placeholder_token,
                     save_path=os.path.join(save_path, f"step_{global_step}.pt"),
                 )
+                moved = (
+                    torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
+                    .mean()
+                    .item()
+                )
+
+                print("LORA Unet Moved", moved)
+                moved = (
+                    torch.tensor(
+                        list(itertools.chain(*inspect_lora(text_encoder).values()))
+                    )
+                    .mean()
+                    .item()
+                )
+
+                print("LORA CLIP Moved", moved)
+
+            if global_step >= num_steps:
+                return
 
 
 def main(
@@ -279,7 +301,7 @@ def main(
     revision: Optional[str] = None,
     class_data_dir: Optional[str] = None,
     stochastic_attribute: Optional[str] = None,
-    perform_inverse: bool = True,
+    perform_inversion: bool = True,
     learnable_property: str = "object",
     placeholder_token: str = "<s>",
     initializer_token: str = "dog",
@@ -375,12 +397,12 @@ def main(
         param.requires_grad = False
 
     # STEP 1 : Perform Inversion
-    if perform_inverse:
+    if perform_inversion:
         ti_optimizer = optim.AdamW(
             text_encoder.get_input_embeddings().parameters(), lr=ti_lr
         )
 
-        perform_inversion(
+        train_inversion(
             unet,
             vae,
             text_encoder,
@@ -403,11 +425,13 @@ def main(
     )
 
     print("Before training:")
-    inspect_lora(unet, target_replace_module=lora_unet_target_modules)
+    inspect_lora(unet)
 
     params_to_optimize = [
         {"params": itertools.chain(*unet_lora_params), "lr": unet_lr},
     ]
+
+    text_encoder.requires_grad_(False)
 
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
@@ -421,7 +445,7 @@ def main(
                 "lr": text_encoder_lr,
             }
         ]
-        inspect_lora(text_encoder, target_replace_module=lora_clip_target_modules)
+        inspect_lora(text_encoder)
 
     lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=0.001)
 

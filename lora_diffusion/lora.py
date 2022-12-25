@@ -592,24 +592,23 @@ def patch_pipe(
 
 
 @torch.no_grad()
-def inspect_lora(model, target_replace_module=DEFAULT_TARGET_REPLACE):
-    fnorm = {}
+def inspect_lora(model):
+    moved = {}
 
-    for _module, name, _child_module in _find_modules(
-        model, target_replace_module, search_class=[LoraInjectedLinear]
-    ):
-        ups = _module._modules[name].lora_up.weight
-        downs = _module._modules[name].lora_down.weight
+    for name, _module in model.named_modules():
+        if _module.__class__.__name__ == "LoraInjectedLinear":
+            ups = _module.lora_up.weight.data
+            downs = _module.lora_down.weight.data
 
-        wght: torch.Tensor = ups @ downs
-        fnormval = wght.flatten().pow(2).mean().item()
-        if name in fnorm:
-            fnorm[name].append(fnormval)
-        else:
-            fnorm[name] = [fnormval]
+            wght: torch.Tensor = ups @ downs
 
-    for k, v in fnorm.items():
-        print(f"F norm on Current LoRA of {k} : {v}")
+            dist = wght.flatten().abs().mean().item()
+            if name in moved:
+                moved[name].append(dist)
+            else:
+                moved[name] = [dist]
+
+    return moved
 
 
 def save_all(
@@ -641,6 +640,6 @@ def save_all(
         )
         print("Text Encoder saved to ", _text_lora_path(save_path))
         save_lora_weight(
-            unet, save_path, target_replace_module_unet=target_replace_module_unet
+            unet, save_path, target_replace_module=target_replace_module_unet
         )
         print("Unet saved to ", save_path)
