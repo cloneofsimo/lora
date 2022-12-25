@@ -76,6 +76,7 @@ class DreamBoothTiDataset(Dataset):
         class_data_root=None,
         class_prompt=None,
         size=512,
+        h_flip=True,
         center_crop=False,
         color_jitter=False,
         resize=False,
@@ -508,7 +509,7 @@ def parse_args(input_args=None):
         type=bool,
         default=True,
         required=False,
-        help="Should images be resized to --resolution before training?"
+        help="Should images be resized to --resolution before training?",
     )
 
     if input_args is not None:
