@@ -292,7 +292,7 @@ def perform_tuning(
                 return
 
 
-def main(
+def train(
     instance_data_dir: str,
     pretrained_model_name_or_path: str,
     output_dir: str,
@@ -302,7 +302,7 @@ def main(
     class_data_dir: Optional[str] = None,
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
-    learnable_property: str = "object",
+    learnable_property: str = "object",  # not used
     placeholder_token: str = "<s>",
     initializer_token: str = "dog",
     class_prompt: Optional[str] = None,
@@ -330,6 +330,8 @@ def main(
     scale_lr: bool = False,
     lr_scheduler: str = "constant",
     lr_warmup_steps: int = 100,
+    weight_decay_ti: float = 0.01,
+    weight_decay_lora: float = 0.01,
     use_8bit_adam: bool = False,
     device="cuda:1",
 ):
@@ -399,7 +401,9 @@ def main(
     # STEP 1 : Perform Inversion
     if perform_inversion:
         ti_optimizer = optim.AdamW(
-            text_encoder.get_input_embeddings().parameters(), lr=ti_lr
+            text_encoder.get_input_embeddings().parameters(),
+            lr=ti_lr,
+            weight_decay=weight_decay_ti,
         )
 
         train_inversion(
@@ -447,7 +451,7 @@ def main(
         ]
         inspect_lora(text_encoder)
 
-    lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=0.001)
+    lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
 
     unet.train()
     if train_text_encoder:
@@ -468,5 +472,5 @@ def main(
     )
 
 
-if __name__ == "__main__":
-    fire.Fire(main)
+def main():
+    fire.Fire(train)
