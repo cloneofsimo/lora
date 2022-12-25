@@ -3,3 +3,4 @@ transformers
 scipy
 ftfy
 fire
+wandb
