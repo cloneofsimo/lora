@@ -322,7 +322,7 @@ def train(
     gradient_checkpointing: bool = False,
     mixed_precision="fp16",
     lora_rank: int = 4,
-    lora_unet_target_modules=["CrossAttention", "Attention", "GELU"],
+    lora_unet_target_modules=["CrossAttention", "Attention", "GEGLU"],
     lora_clip_target_modules=["CLIPAttention"],
     learning_rate_unet: float = 1e-5,
     learning_rate_text: float = 1e-5,
@@ -333,7 +333,7 @@ def train(
     weight_decay_ti: float = 0.01,
     weight_decay_lora: float = 0.01,
     use_8bit_adam: bool = False,
-    device="cuda:1",
+    device="cuda:0",
 ):
     torch.manual_seed(seed)
 
