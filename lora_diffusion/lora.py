@@ -560,6 +560,8 @@ def patch_pipe(
     patch_text=False,
     patch_ti=False,
     idempotent_token=True,
+    unet_target_replace_module=DEFAULT_TARGET_REPLACE,
+    text_target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
 ):
     assert (
         len(token) > 0
@@ -570,14 +572,19 @@ def patch_pipe(
 
     if patch_unet:
         print("LoRA : Patching Unet")
-        monkeypatch_or_replace_lora(pipe.unet, torch.load(unet_path), r=r)
+        monkeypatch_or_replace_lora(
+            pipe.unet,
+            torch.load(unet_path),
+            r=r,
+            target_replace_module=unet_target_replace_module,
+        )
 
     if patch_text:
         print("LoRA : Patching text encoder")
         monkeypatch_or_replace_lora(
             pipe.text_encoder,
             torch.load(text_path),
-            target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
+            target_replace_module=text_target_replace_module,
             r=r,
         )
     if patch_ti:
