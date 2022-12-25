@@ -141,9 +141,10 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
     return train_dataloader
 
 
+@torch.autocast("cuda")
 def loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype):
     latents = vae.encode(
-        batch["pixel_values"].to(weight_dtype).to(unet.device)
+        batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
     ).latent_dist.sample()
     latents = latents * 0.18215
 
@@ -175,7 +176,6 @@ def loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype):
     return loss
 
 
-@torch.autocast("cuda")
 def train_inversion(
     unet,
     vae,
@@ -232,7 +232,6 @@ def train_inversion(
                 return
 
 
-@torch.autocast("cuda")
 def perform_tuning(
     unet,
     vae,
@@ -253,14 +252,21 @@ def perform_tuning(
 
     weight_dtype = torch.float16
 
+    unet.train()
+    text_encoder.train()
+
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         for batch in dataloader:
+            optimizer.zero_grad()
 
             loss = loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
+            )
             optimizer.step()
             progress_bar.update(1)
-            optimizer.zero_grad()
+
             global_step += 1
 
             if global_step % save_steps == 0:
@@ -318,12 +324,12 @@ def train(
     max_train_steps_tuning: int = 10000,
     max_train_steps_ti: int = 2000,
     save_steps: int = 500,
-    gradient_accumulation_steps: bool = False,
+    gradient_accumulation_steps: int = 1,
     gradient_checkpointing: bool = False,
     mixed_precision="fp16",
     lora_rank: int = 4,
-    lora_unet_target_modules=["CrossAttention", "Attention", "GEGLU"],
-    lora_clip_target_modules=["CLIPAttention"],
+    lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
+    lora_clip_target_modules={"CLIPAttention"},
     learning_rate_unet: float = 1e-5,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,

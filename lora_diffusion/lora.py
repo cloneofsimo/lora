@@ -53,7 +53,7 @@ def _find_children(
                 yield parent, name, module
 
 
-def _find_modules(
+def _find_modules_v2(
     model,
     ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
     search_class: List[Type[nn.Module]] = [nn.Linear],
@@ -90,6 +90,26 @@ def _find_modules(
                     continue
                 # Otherwise, yield it
                 yield parent, name, module
+
+
+def _find_modules_old(
+    model,
+    ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
+    search_class: List[Type[nn.Module]] = [nn.Linear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+):
+    ret = []
+    for _module in model.modules():
+        if _module.__class__.__name__ in ancestor_class:
+
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__ in search_class:
+                    ret.append((_module, name, _child_module))
+    print(ret)
+    return ret
+
+
+_find_modules = _find_modules_v2
 
 
 def inject_trainable_lora(
@@ -604,8 +624,8 @@ def inspect_lora(model):
 
     for name, _module in model.named_modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
-            ups = _module.lora_up.weight.data
-            downs = _module.lora_down.weight.data
+            ups = _module.lora_up.weight.data.clone()
+            downs = _module.lora_down.weight.data.clone()
 
             wght: torch.Tensor = ups @ downs
 
@@ -640,13 +660,15 @@ def save_all(
 
     # save text encoder
     if save_lora:
+
+        save_lora_weight(
+            unet, save_path, target_replace_module=target_replace_module_unet
+        )
+        print("Unet saved to ", save_path)
+
         save_lora_weight(
             text_encoder,
             _text_lora_path(save_path),
             target_replace_module=target_replace_module_text,
         )
         print("Text Encoder saved to ", _text_lora_path(save_path))
-        save_lora_weight(
-            unet, save_path, target_replace_module=target_replace_module_unet
-        )
-        print("Unet saved to ", save_path)

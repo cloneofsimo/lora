@@ -185,6 +185,11 @@ class PivotalTuningDatasetTemplate(Dataset):
 
 
 class PivotalTuningDatasetCapation(Dataset):
+    """
+    A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
+    It pre-processes the images and the tokenizes prompts.
+    """
+
     def __init__(
         self,
         instance_data_root,
@@ -194,12 +199,15 @@ class PivotalTuningDatasetCapation(Dataset):
         class_data_root=None,
         class_prompt=None,
         size=512,
+        h_flip=True,
         center_crop=False,
         color_jitter=False,
+        resize=True,
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
+        self.resize = resize
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -209,9 +217,6 @@ class PivotalTuningDatasetCapation(Dataset):
         self.num_instance_images = len(self.instance_images_path)
 
         self.placeholder_token = placeholder_token
-        self.stochastic_attribute_split = (
-            None if stochastic_attribute is None else stochastic_attribute.split(",")
-        )
 
         self._length = self.num_instance_images
 
@@ -225,22 +230,38 @@ class PivotalTuningDatasetCapation(Dataset):
         else:
             self.class_data_root = None
 
-        self.image_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    size, interpolation=transforms.InterpolationMode.BILINEAR
-                ),
-                transforms.CenterCrop(size)
-                if center_crop
-                else transforms.RandomCrop(size),
-                transforms.ColorJitter(0.2, 0.1)
-                if color_jitter
-                else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
+        if resize:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.Resize(
+                        size, interpolation=transforms.InterpolationMode.BILINEAR
+                    ),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
+        else:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.CenterCrop(size)
+                    if center_crop
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
 
     def __len__(self):
         return self._length
@@ -254,12 +275,9 @@ class PivotalTuningDatasetCapation(Dataset):
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
 
-        text = self.instance_images_path[index % self.num_instance_images].stem + (
-            ", ".join(_randomset(self.stochastic_attribute_split))
-            if self.stochastic_attribute_split
-            else ""
-        )
+        text = self.instance_images_path[index % self.num_instance_images].stem
 
+        # print(text)
         example["instance_prompt_ids"] = self.tokenizer(
             text,
             padding="do_not_pad",
