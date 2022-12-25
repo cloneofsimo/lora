@@ -124,6 +124,7 @@ def inject_trainable_lora(
             _tmp.linear.bias = bias
 
         # switch the module
+        _tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
         _module._modules[name] = _tmp
 
         require_grad_params.append(_module._modules[name].lora_up.parameters())
@@ -592,18 +593,54 @@ def patch_pipe(
 
 @torch.no_grad()
 def inspect_lora(model, target_replace_module=DEFAULT_TARGET_REPLACE):
+    fnorm = {}
 
-    fnorm = {k: [] for k in target_replace_module}
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[LoraInjectedLinear]
+    ):
+        ups = _module._modules[name].lora_up.weight
+        downs = _module._modules[name].lora_down.weight
 
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "LoraInjectedLinear":
-                    ups = _module._modules[name].lora_up.weight
-                    downs = _module._modules[name].lora_down.weight
-
-                    wght: torch.Tensor = downs @ ups
-                    fnorm[name].append(wght.flatten().pow(2).mean().item())
+        wght: torch.Tensor = ups @ downs
+        fnormval = wght.flatten().pow(2).mean().item()
+        if name in fnorm:
+            fnorm[name].append(fnormval)
+        else:
+            fnorm[name] = [fnormval]
 
     for k, v in fnorm.items():
         print(f"F norm on Current LoRA of {k} : {v}")
+
+
+def save_all(
+    unet,
+    text_encoder,
+    placeholder_token_id,
+    placeholder_token,
+    save_path,
+    save_lora=True,
+    target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
+    target_replace_module_unet=DEFAULT_TARGET_REPLACE,
+):
+
+    # save ti
+    ti_path = _ti_lora_path(save_path)
+    learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_id]
+    print("Current Learned Embeddings: ", learned_embeds[:4])
+
+    learned_embeds_dict = {placeholder_token: learned_embeds.detach().cpu()}
+    torch.save(learned_embeds_dict, ti_path)
+    print("Ti saved to ", ti_path)
+
+    # save text encoder
+    if save_lora:
+        save_lora_weight(
+            text_encoder,
+            _text_lora_path(save_path),
+            target_replace_module=target_replace_module_text,
+        )
+        print("Text Encoder saved to ", _text_lora_path(save_path))
+        save_lora_weight(
+            unet, save_path, target_replace_module_unet=target_replace_module_unet
+        )
+        print("Unet saved to ", save_path)
