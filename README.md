@@ -51,7 +51,10 @@
 
 ### 2022/12/22
 
-- Pivotal Tuning now available with
+- Pivotal Tuning now available with `run_lorpt.sh`
+- More Utilities added, such as datasets, `patch_pipe` function to patch CLIP, Unet, Token all at once.
+- Adjustable Ranks, Fine-tuning Feed-forward layers.
+- More example notebooks added.
 
 ### 2022/12/10
 
@@ -89,7 +92,7 @@ Second, there is Textual inversion. There is no room to apply LoRA here, but it 
 
 3. [Pivotal Tuning](https://arxiv.org/abs/2106.05744)
 
-Last method (although originally proposed for GANs) takes the best of both worlds to further benefit. Wken combined together, this can be implemented as a strict generalization of both methods.
+Last method (although originally proposed for GANs) takes the best of both worlds to further benefit. When combined together, this can be implemented as a strict generalization of both methods.
 Simply you apply textual inversion to get a matching token embedding. Then, you use the token embedding + prior-preserving class image to fine-tune the model. This two-fold nature make this strict generalization of both methods.
 
 Enough of the lengthy introduction, let's get to the code.
@@ -107,7 +110,7 @@ pip install git+https://github.com/cloneofsimo/lora.git
 Basic usage is as follows: prepare sets of $A, B$ matrices in an unet model, and fine-tune them.
 
 ```python
-from lora_diffusion import inject_trainable_lora, extract_lora_up_downs
+from lora_diffusion import inject_trainable_lora, extract_lora_ups_down
 
 ...
 
@@ -342,7 +345,7 @@ TODOS
 
 # References
 
-This work was heavily influenced by, and originated by these awesome researches. I'm just applying them here.
+This work was heavily influenced by, and originated from these awesome researches. I'm just applying them here.
 
 ```bibtex
 @article{roich2022pivotal,
@@ -375,7 +378,7 @@ This work was heavily influenced by, and originated by these awesome researches.
 }
 ```
 
-```
+```bibtex
 @article{hu2021lora,
   title={Lora: Low-rank adaptation of large language models},
   author={Hu, Edward J and Shen, Yelong and Wallis, Phillip and Allen-Zhu, Zeyuan and Li, Yuanzhi and Wang, Shean and Wang, Lu and Chen, Weizhu},

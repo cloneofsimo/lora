@@ -138,7 +138,6 @@ class DreamBoothTiDataset(Dataset):
         self.tokenizer = tokenizer
         self.resize = resize
 
-
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
             raise ValueError("Instance images root doesn't exists.")
@@ -572,7 +571,7 @@ def parse_args(input_args=None):
         type=bool,
         default=True,
         required=False,
-        help="Should images be resized to --resolution before training?"
+        help="Should images be resized to --resolution before training?",
     )
 
     if input_args is not None:
