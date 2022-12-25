@@ -1,12 +1,12 @@
 import math
-from typing import Callable, Dict, List, Optional, Tuple
+from itertools import groupby
+from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import numpy as np
 import PIL
 import torch
-import torch.nn.functional as F
-
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class LoraInjectedLinear(nn.Module):
@@ -30,9 +30,91 @@ class LoraInjectedLinear(nn.Module):
         return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
 
 
+UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
+TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
+
+DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
+
+
+def _find_children(
+    model,
+    search_class: List[Type[nn.Module]] = [nn.Linear],
+):
+    """
+    Find all modules of a certain class (or union of classes).
+
+    Returns all matching modules, along with the parent of those moduless and the
+    names they are referenced by.
+    """
+    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    for parent in model.modules():
+        for name, module in parent.named_children():
+            if any([isinstance(module, _class) for _class in search_class]):
+                yield parent, name, module
+
+
+def _find_modules_v2(
+    model,
+    ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
+    search_class: List[Type[nn.Module]] = [nn.Linear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+):
+    """
+    Find all modules of a certain class (or union of classes) that are direct or
+    indirect descendants of other modules of a certain class (or union of classes).
+
+    Returns all matching modules, along with the parent of those moduless and the
+    names they are referenced by.
+    """
+
+    # Get the targets we should replace all linears under
+    ancestors = (
+        module
+        for module in model.modules()
+        if module.__class__.__name__ in ancestor_class
+    )
+
+    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    for ancestor in ancestors:
+        for fullname, module in ancestor.named_modules():
+            if any([isinstance(module, _class) for _class in search_class]):
+                # Find the direct parent if this is a descendant, not a child, of target
+                *path, name = fullname.split(".")
+                parent = ancestor
+                while path:
+                    parent = parent.get_submodule(path.pop(0))
+                # Skip this linear if it's a child of a LoraInjectedLinear
+                if exclude_children_of and any(
+                    [isinstance(parent, _class) for _class in exclude_children_of]
+                ):
+                    continue
+                # Otherwise, yield it
+                yield parent, name, module
+
+
+def _find_modules_old(
+    model,
+    ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
+    search_class: List[Type[nn.Module]] = [nn.Linear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+):
+    ret = []
+    for _module in model.modules():
+        if _module.__class__.__name__ in ancestor_class:
+
+            for name, _child_module in _module.named_modules():
+                if _child_module.__class__ in search_class:
+                    ret.append((_module, name, _child_module))
+    print(ret)
+    return ret
+
+
+_find_modules = _find_modules_v2
+
+
 def inject_trainable_lora(
     model: nn.Module,
-    target_replace_module: List[str] = ["CrossAttention", "Attention", "GEGLU"],
+    target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
     r: int = 4,
     loras=None,  # path to lora .pt
 ):
@@ -46,64 +128,58 @@ def inject_trainable_lora(
     if loras != None:
         loras = torch.load(loras)
 
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[nn.Linear]
+    ):
+        weight = _child_module.weight
+        bias = _child_module.bias
+        _tmp = LoraInjectedLinear(
+            _child_module.in_features,
+            _child_module.out_features,
+            _child_module.bias is not None,
+            r,
+        )
+        _tmp.linear.weight = weight
+        if bias is not None:
+            _tmp.linear.bias = bias
 
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "Linear":
+        # switch the module
+        _tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
+        _module._modules[name] = _tmp
 
-                    weight = _child_module.weight
-                    bias = _child_module.bias
-                    _tmp = LoraInjectedLinear(
-                        _child_module.in_features,
-                        _child_module.out_features,
-                        _child_module.bias is not None,
-                        r,
-                    )
-                    _tmp.linear.weight = weight
-                    if bias is not None:
-                        _tmp.linear.bias = bias
+        require_grad_params.append(_module._modules[name].lora_up.parameters())
+        require_grad_params.append(_module._modules[name].lora_down.parameters())
 
-                    # switch the module
-                    _module._modules[name] = _tmp
+        if loras != None:
+            _module._modules[name].lora_up.weight = loras.pop(0)
+            _module._modules[name].lora_down.weight = loras.pop(0)
 
-                    require_grad_params.append(
-                        _module._modules[name].lora_up.parameters()
-                    )
-                    require_grad_params.append(
-                        _module._modules[name].lora_down.parameters()
-                    )
+        _module._modules[name].lora_up.weight.requires_grad = True
+        _module._modules[name].lora_down.weight.requires_grad = True
+        names.append(name)
 
-                    if loras != None:
-                        _module._modules[name].lora_up.weight = loras.pop(0)
-                        _module._modules[name].lora_down.weight = loras.pop(0)
-
-                    _module._modules[name].lora_up.weight.requires_grad = True
-                    _module._modules[name].lora_down.weight.requires_grad = True
-                    names.append(name)
     return require_grad_params, names
 
 
-def extract_lora_ups_down(
-    model, target_replace_module=["CrossAttention", "Attention", "GEGLU"]
-):
+def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
 
     loras = []
 
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for _child_module in _module.modules():
-                if _child_module.__class__.__name__ == "LoraInjectedLinear":
-                    loras.append((_child_module.lora_up, _child_module.lora_down))
+    for _m, _n, _child_module in _find_modules(
+        model, target_replace_module, search_class=[LoraInjectedLinear]
+    ):
+        loras.append((_child_module.lora_up, _child_module.lora_down))
+
     if len(loras) == 0:
         raise ValueError("No lora injected.")
+
     return loras
 
 
 def save_lora_weight(
     model,
     path="./lora.pt",
-    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
+    target_replace_module=DEFAULT_TARGET_REPLACE,
 ):
     weights = []
     for _up, _down in extract_lora_ups_down(
@@ -127,138 +203,320 @@ def save_lora_as_json(model, path="./lora.json"):
         json.dump(weights, f)
 
 
+def save_safeloras(
+    modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Saves the Lora from multiple modules in a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (module, target_replace_module)
+    }
+    """
+    weights = {}
+    metadata = {}
+
+    import json
+
+    from safetensors.torch import save_file
+
+    for name, (model, target_replace_module) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+
+        for i, (_up, _down) in enumerate(
+            extract_lora_ups_down(model, target_replace_module)
+        ):
+            metadata[f"{name}:{i}:rank"] = str(_down.out_features)
+            weights[f"{name}:{i}:up"] = _up.weight
+            weights[f"{name}:{i}:down"] = _down.weight
+
+    print(f"Saving weights to {outpath} with metadata", metadata)
+    save_file(weights, outpath, metadata)
+
+
+def convert_loras_to_safeloras(
+    modelmap: Dict[str, Tuple[str, Set[str], int]] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Converts the Lora from multiple pytorch .pt files into a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (pytorch_model_path, target_replace_module, rank)
+    }
+    """
+
+    weights = {}
+    metadata = {}
+
+    import json
+
+    from safetensors.torch import save_file
+
+    for name, (path, target_replace_module, r) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+
+        lora = torch.load(path)
+        for i, weight in enumerate(lora):
+            is_up = i % 2 == 0
+            i = i // 2
+
+            if is_up:
+                metadata[f"{name}:{i}:rank"] = str(r)
+                weights[f"{name}:{i}:up"] = weight
+            else:
+                weights[f"{name}:{i}:down"] = weight
+
+    print(f"Saving weights to {outpath} with metadata", metadata)
+    save_file(weights, outpath, metadata)
+
+
+def parse_safeloras(
+    safeloras,
+) -> Dict[str, Tuple[List[nn.parameter.Parameter], List[int], List[str]]]:
+    """
+    Converts a loaded safetensor file that contains a set of module Loras
+    into Parameters and other information
+
+    Output is a dictionary of {
+        "module name": (
+            [list of weights],
+            [list of ranks],
+            target_replacement_modules
+        )
+    }
+    """
+    loras = {}
+
+    import json
+
+    metadata = safeloras.metadata()
+
+    get_name = lambda k: k.split(":")[0]
+
+    keys = list(safeloras.keys())
+    keys.sort(key=get_name)
+
+    for name, module_keys in groupby(keys, get_name):
+        # Extract the targets
+        target = json.loads(metadata[name])
+
+        # Build the result lists - Python needs us to preallocate lists to insert into them
+        module_keys = list(module_keys)
+        ranks = [None] * (len(module_keys) // 2)
+        weights = [None] * len(module_keys)
+
+        for key in module_keys:
+            # Split the model name and index out of the key
+            _, idx, direction = key.split(":")
+            idx = int(idx)
+
+            # Add the rank
+            ranks[idx] = json.loads(metadata[f"{name}:{idx}:rank"])
+
+            # Insert the weight into the list
+            idx = idx * 2 + (1 if direction == "down" else 0)
+            weights[idx] = nn.parameter.Parameter(safeloras.get_tensor(key))
+
+        loras[name] = (weights, ranks, target)
+
+    return loras
+
+
+def load_safeloras(path, device="cpu"):
+
+    from safetensors.torch import safe_open
+
+    safeloras = safe_open(path, framework="pt", device=device)
+    return parse_safeloras(safeloras)
+
+
 def weight_apply_lora(
-    model,
-    loras,
-    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
-    alpha=1.0,
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, alpha=1.0
 ):
 
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for _child_module in _module.modules():
-                if _child_module.__class__.__name__ == "Linear":
+    for _m, _n, _child_module in _find_modules(
+        model, target_replace_module, search_class=[nn.Linear]
+    ):
+        weight = _child_module.weight
 
-                    weight = _child_module.weight
+        up_weight = loras.pop(0).detach().to(weight.device)
+        down_weight = loras.pop(0).detach().to(weight.device)
 
-                    up_weight = loras.pop(0).detach().to(weight.device)
-                    down_weight = loras.pop(0).detach().to(weight.device)
-
-                    # W <- W + U * D
-                    weight = weight + alpha * (up_weight @ down_weight).type(
-                        weight.dtype
-                    )
-                    _child_module.weight = nn.Parameter(weight)
+        # W <- W + U * D
+        weight = weight + alpha * (up_weight @ down_weight).type(weight.dtype)
+        _child_module.weight = nn.Parameter(weight)
 
 
 def monkeypatch_lora(
-    model,
-    loras,
-    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
-    r: int = 4,
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4
 ):
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "Linear":
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[nn.Linear]
+    ):
+        weight = _child_module.weight
+        bias = _child_module.bias
+        _tmp = LoraInjectedLinear(
+            _child_module.in_features,
+            _child_module.out_features,
+            _child_module.bias is not None,
+            r=r,
+        )
+        _tmp.linear.weight = weight
 
-                    weight = _child_module.weight
-                    bias = _child_module.bias
-                    _tmp = LoraInjectedLinear(
-                        _child_module.in_features,
-                        _child_module.out_features,
-                        _child_module.bias is not None,
-                        r=r,
-                    )
-                    _tmp.linear.weight = weight
+        if bias is not None:
+            _tmp.linear.bias = bias
 
-                    if bias is not None:
-                        _tmp.linear.bias = bias
+        # switch the module
+        _module._modules[name] = _tmp
 
-                    # switch the module
-                    _module._modules[name] = _tmp
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
 
-                    up_weight = loras.pop(0)
-                    down_weight = loras.pop(0)
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype)
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype)
+        )
 
-                    _module._modules[name].lora_up.weight = nn.Parameter(
-                        up_weight.type(weight.dtype)
-                    )
-                    _module._modules[name].lora_down.weight = nn.Parameter(
-                        down_weight.type(weight.dtype)
-                    )
-
-                    _module._modules[name].to(weight.device)
+        _module._modules[name].to(weight.device)
 
 
 def monkeypatch_replace_lora(
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4
+):
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[LoraInjectedLinear]
+    ):
+        weight = _child_module.linear.weight
+        bias = _child_module.linear.bias
+        _tmp = LoraInjectedLinear(
+            _child_module.linear.in_features,
+            _child_module.linear.out_features,
+            _child_module.linear.bias is not None,
+            r=r,
+        )
+        _tmp.linear.weight = weight
+
+        if bias is not None:
+            _tmp.linear.bias = bias
+
+        # switch the module
+        _module._modules[name] = _tmp
+
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
+
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype)
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype)
+        )
+
+        _module._modules[name].to(weight.device)
+
+
+def monkeypatch_or_replace_lora(
     model,
     loras,
-    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
-    r: int = 4,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: Union[int, List[int]] = 4,
 ):
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[nn.Linear, LoraInjectedLinear]
+    ):
+        _source = (
+            _child_module.linear
+            if isinstance(_child_module, LoraInjectedLinear)
+            else _child_module
+        )
 
-                    weight = _child_module.linear.weight
-                    bias = _child_module.linear.bias
-                    _tmp = LoraInjectedLinear(
-                        _child_module.linear.in_features,
-                        _child_module.linear.out_features,
-                        _child_module.linear.bias is not None,
-                        r=r,
-                    )
-                    _tmp.linear.weight = weight
+        weight = _source.weight
+        bias = _source.bias
+        _tmp = LoraInjectedLinear(
+            _source.in_features,
+            _source.out_features,
+            _source.bias is not None,
+            r=r.pop(0) if isinstance(r, list) else r,
+        )
+        _tmp.linear.weight = weight
 
-                    if bias is not None:
-                        _tmp.linear.bias = bias
+        if bias is not None:
+            _tmp.linear.bias = bias
 
-                    # switch the module
-                    _module._modules[name] = _tmp
+        # switch the module
+        _module._modules[name] = _tmp
 
-                    up_weight = loras.pop(0)
-                    down_weight = loras.pop(0)
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
 
-                    _module._modules[name].lora_up.weight = nn.Parameter(
-                        up_weight.type(weight.dtype)
-                    )
-                    _module._modules[name].lora_down.weight = nn.Parameter(
-                        down_weight.type(weight.dtype)
-                    )
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype)
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype)
+        )
 
-                    _module._modules[name].to(weight.device)
+        _module._modules[name].to(weight.device)
+
+
+def monkeypatch_or_replace_safeloras(models, safeloras):
+    loras = parse_safeloras(safeloras)
+
+    for name, (lora, ranks, target) in loras.items():
+        model = getattr(models, name, None)
+
+        if not model:
+            print(f"No model provided for {name}, contained in Lora")
+            continue
+
+        monkeypatch_or_replace_lora(model, lora, target, ranks)
+
+
+def monkeypatch_remove_lora(model):
+    for _module, name, _child_module in _find_children(
+        model, search_class=[LoraInjectedLinear]
+    ):
+        _source = _child_module.linear
+        weight, bias = _source.weight, _source.bias
+
+        _tmp = nn.Linear(_source.in_features, _source.out_features, bias is not None)
+
+        _tmp.weight = weight
+        if bias is not None:
+            _tmp.bias = bias
+
+        _module._modules[name] = _tmp
 
 
 def monkeypatch_add_lora(
     model,
     loras,
-    target_replace_module=["CrossAttention", "Attention", "GEGLU"],
+    target_replace_module=DEFAULT_TARGET_REPLACE,
     alpha: float = 1.0,
     beta: float = 1.0,
 ):
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "LoraInjectedLinear":
+    for _module, name, _child_module in _find_modules(
+        model, target_replace_module, search_class=[LoraInjectedLinear]
+    ):
+        weight = _child_module.linear.weight
 
-                    weight = _child_module.linear.weight
+        up_weight = loras.pop(0)
+        down_weight = loras.pop(0)
 
-                    up_weight = loras.pop(0)
-                    down_weight = loras.pop(0)
+        _module._modules[name].lora_up.weight = nn.Parameter(
+            up_weight.type(weight.dtype).to(weight.device) * alpha
+            + _module._modules[name].lora_up.weight.to(weight.device) * beta
+        )
+        _module._modules[name].lora_down.weight = nn.Parameter(
+            down_weight.type(weight.dtype).to(weight.device) * alpha
+            + _module._modules[name].lora_down.weight.to(weight.device) * beta
+        )
 
-                    _module._modules[name].lora_up.weight = nn.Parameter(
-                        up_weight.type(weight.dtype).to(weight.device) * alpha
-                        + _module._modules[name].lora_up.weight.to(weight.device) * beta
-                    )
-                    _module._modules[name].lora_down.weight = nn.Parameter(
-                        down_weight.type(weight.dtype).to(weight.device) * alpha
-                        + _module._modules[name].lora_down.weight.to(weight.device)
-                        * beta
-                    )
-
-                    _module._modules[name].to(weight.device)
+        _module._modules[name].to(weight.device)
 
 
 def tune_lora_scale(model, alpha: float = 1.0):
@@ -322,6 +580,8 @@ def patch_pipe(
     patch_text=False,
     patch_ti=False,
     idempotent_token=True,
+    unet_target_replace_module=DEFAULT_TARGET_REPLACE,
+    text_target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
 ):
     assert (
         len(token) > 0
@@ -330,41 +590,23 @@ def patch_pipe(
     ti_path = _ti_lora_path(unet_path)
     text_path = _text_lora_path(unet_path)
 
-    unet_has_lora = False
-    text_encoder_has_lora = False
-
-    for _module in pipe.unet.modules():
-        if _module.__class__.__name__ == "LoraInjectedLinear":
-            unet_has_lora = True
-
-    for _module in pipe.text_encoder.modules():
-        if _module.__class__.__name__ == "LoraInjectedLinear":
-            text_encoder_has_lora = True
     if patch_unet:
         print("LoRA : Patching Unet")
-
-        if not unet_has_lora:
-            monkeypatch_lora(pipe.unet, torch.load(unet_path), r=r)
-        else:
-            monkeypatch_replace_lora(pipe.unet, torch.load(unet_path), r=r)
+        monkeypatch_or_replace_lora(
+            pipe.unet,
+            torch.load(unet_path),
+            r=r,
+            target_replace_module=unet_target_replace_module,
+        )
 
     if patch_text:
         print("LoRA : Patching text encoder")
-        if not text_encoder_has_lora:
-            monkeypatch_lora(
-                pipe.text_encoder,
-                torch.load(text_path),
-                target_replace_module=["CLIPAttention"],
-                r=r,
-            )
-        else:
-
-            monkeypatch_replace_lora(
-                pipe.text_encoder,
-                torch.load(text_path),
-                target_replace_module=["CLIPAttention"],
-                r=r,
-            )
+        monkeypatch_or_replace_lora(
+            pipe.text_encoder,
+            torch.load(text_path),
+            target_replace_module=text_target_replace_module,
+            r=r,
+        )
     if patch_ti:
         print("LoRA : Patching token input")
         token = load_learned_embed_in_clip(
@@ -377,19 +619,56 @@ def patch_pipe(
 
 
 @torch.no_grad()
-def inspect_lora(model, target_replace_module=["CrossAttention", "Attention", "GEGLU"]):
+def inspect_lora(model):
+    moved = {}
 
-    fnorm = {k: [] for k in target_replace_module}
+    for name, _module in model.named_modules():
+        if _module.__class__.__name__ == "LoraInjectedLinear":
+            ups = _module.lora_up.weight.data.clone()
+            downs = _module.lora_down.weight.data.clone()
 
-    for _module in model.modules():
-        if _module.__class__.__name__ in target_replace_module:
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__.__name__ == "LoraInjectedLinear":
-                    ups = _module._modules[name].lora_up.weight
-                    downs = _module._modules[name].lora_down.weight
+            wght: torch.Tensor = ups @ downs
 
-                    wght: torch.Tensor = downs @ ups
-                    fnorm[name].append(wght.flatten().pow(2).mean().item())
+            dist = wght.flatten().abs().mean().item()
+            if name in moved:
+                moved[name].append(dist)
+            else:
+                moved[name] = [dist]
 
-    for k, v in fnorm.items():
-        print(f"F norm on Current LoRA of {k} : {v}")
+    return moved
+
+
+def save_all(
+    unet,
+    text_encoder,
+    placeholder_token_id,
+    placeholder_token,
+    save_path,
+    save_lora=True,
+    target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
+    target_replace_module_unet=DEFAULT_TARGET_REPLACE,
+):
+
+    # save ti
+    ti_path = _ti_lora_path(save_path)
+    learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_id]
+    print("Current Learned Embeddings: ", learned_embeds[:4])
+
+    learned_embeds_dict = {placeholder_token: learned_embeds.detach().cpu()}
+    torch.save(learned_embeds_dict, ti_path)
+    print("Ti saved to ", ti_path)
+
+    # save text encoder
+    if save_lora:
+
+        save_lora_weight(
+            unet, save_path, target_replace_module=target_replace_module_unet
+        )
+        print("Unet saved to ", save_path)
+
+        save_lora_weight(
+            text_encoder,
+            _text_lora_path(save_path),
+            target_replace_module=target_replace_module_text,
+        )
+        print("Text Encoder saved to ", _text_lora_path(save_path))

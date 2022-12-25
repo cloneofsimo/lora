@@ -131,10 +131,12 @@ class DreamBoothTiDataset(Dataset):
         size=512,
         center_crop=False,
         color_jitter=False,
+        resize=False,
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
+        self.resize = resize
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -164,22 +166,41 @@ class DreamBoothTiDataset(Dataset):
         else:
             self.class_data_root = None
 
-        self.image_transforms = transforms.Compose(
-            [
-                transforms.Resize(
-                    size, interpolation=transforms.InterpolationMode.BILINEAR
-                ),
-                transforms.CenterCrop(size)
-                if center_crop
-                else transforms.RandomCrop(size),
-                transforms.ColorJitter(0.2, 0.1)
-                if color_jitter
-                else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
+        if resize:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.Resize(
+                        size, interpolation=transforms.InterpolationMode.BILINEAR
+                    ),
+                    transforms.CenterCrop(size)
+                    if center_crop
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
+        else:
+            self.image_transforms = transforms.Compose(
+                [
+                    transforms.CenterCrop(size)
+                    if center_crop
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ColorJitter(0.2, 0.1)
+                    if color_jitter
+                    else transforms.Lambda(lambda x: x),
+                    transforms.RandomHorizontalFlip()
+                    if h_flip
+                    else transforms.Lambda(lambda x: x),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
 
     def __len__(self):
         return self._length
@@ -545,6 +566,13 @@ def parse_args(input_args=None):
         action="store_true",
         help="Debug to see just ti",
     )
+    parser.add_argument(
+        "--resize",
+        type=bool,
+        default=True,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -812,6 +840,7 @@ def main(args):
         size=args.resolution,
         center_crop=args.center_crop,
         color_jitter=args.color_jitter,
+        resize=args.resize,
     )
 
     def collate_fn(examples):
@@ -1104,7 +1133,6 @@ def main(args):
 
                 if global_step >= args.max_train_steps:
                     break
-
     accelerator.wait_for_everyone()
 
     # Create the pipeline using using the trained modules and save it.
