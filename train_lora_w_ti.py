@@ -132,6 +132,7 @@ class DreamBoothTiDataset(Dataset):
         center_crop=False,
         color_jitter=False,
         resize=False,
+        h_flip=True,
     ):
         self.size = size
         self.center_crop = center_crop
@@ -146,7 +147,9 @@ class DreamBoothTiDataset(Dataset):
         self.num_instance_images = len(self.instance_images_path)
 
         self.placeholder_token = placeholder_token
-        self.stochastic_attribute = stochastic_attribute.split(",")
+        self.stochastic_attribute = (
+            stochastic_attribute.split(",") if stochastic_attribute else []
+        )
 
         self.templates = (
             imagenet_style_templates_small
@@ -220,7 +223,6 @@ class DreamBoothTiDataset(Dataset):
                 + _shuffle(_randomset(self.stochastic_attribute))
             )
         )
-        print(text)
         example["instance_prompt_ids"] = self.tokenizer(
             text,
             padding="do_not_pad",
@@ -331,7 +333,7 @@ def parse_args(input_args=None):
         "--stochastic_attribute",
         type=str,
         default=None,
-        required=True,
+        required=False,
         help="The prompt with identifier specifying the instance",
     )
     parser.add_argument(

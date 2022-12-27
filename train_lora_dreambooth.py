@@ -63,6 +63,7 @@ class DreamBoothDataset(Dataset):
         size=512,
         center_crop=False,
         color_jitter=False,
+        h_flip=False,
         resize=False,
     ):
         self.size = size
@@ -88,7 +89,7 @@ class DreamBoothDataset(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
-            
+
         if resize:
             self.image_transforms = transforms.Compose(
                 [
@@ -447,7 +448,7 @@ def parse_args(input_args=None):
         type=bool,
         default=True,
         required=False,
-        help="Should images be resized to --resolution before training?"
+        help="Should images be resized to --resolution before training?",
     )
 
     if input_args is not None:
@@ -679,7 +680,6 @@ def main(args):
         center_crop=args.center_crop,
         color_jitter=args.color_jitter,
         resize=args.resize,
-
     )
 
     def collate_fn(examples):
