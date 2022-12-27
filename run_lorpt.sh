@@ -23,3 +23,5 @@ accelerate launch train_lora_w_ti.py \
   --initializer_token="woman" \
   --save_steps=500 \
   --unfreeze_lora_step=1500 \
+  --stochastic_attribute="game character,3d render,4k,highres" # these attributes will be randomly appended to the prompts
+  
