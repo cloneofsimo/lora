@@ -10,7 +10,7 @@ import os
 import random
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Literal
 
 import torch
 import torch.nn.functional as F
@@ -46,8 +46,8 @@ def get_models(
     pretrained_model_name_or_path,
     pretrained_vae_name_or_path,
     revision,
-    placeholder_token,
-    initializer_token,
+    placeholder_tokens: List[str],
+    initializer_tokens: List[str],
     device="cuda:0",
 ):
 
@@ -56,32 +56,46 @@ def get_models(
         subfolder="tokenizer",
         revision=revision,
     )
-    # Add the placeholder token in tokenizer
-    num_added_tokens = tokenizer.add_tokens(placeholder_token)
-    if num_added_tokens == 0:
-        raise ValueError(
-            f"The tokenizer already contains the token {placeholder_token}. Please pass a different"
-            " `placeholder_token` that is not already in the tokenizer."
-        )
 
-    token_ids = tokenizer.encode(initializer_token, add_special_tokens=False)
-    # Check if initializer_token is a single token or a sequence of tokens
-    if len(token_ids) > 1:
-        raise ValueError("The initializer token must be a single token.")
-
-    initializer_token_id = token_ids[0]
-    placeholder_token_id = tokenizer.convert_tokens_to_ids(placeholder_token)
-
-    # Load models and create wrapper for stable diffusion
     text_encoder = CLIPTextModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=revision,
     )
 
-    text_encoder.resize_token_embeddings(len(tokenizer))
-    token_embeds = text_encoder.get_input_embeddings().weight.data
-    token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+    placeholder_token_ids = []
+
+    for token, init_tok in zip(placeholder_tokens, initializer_tokens):
+        num_added_tokens = tokenizer.add_tokens(token)
+        if num_added_tokens == 0:
+            raise ValueError(
+                f"The tokenizer already contains the token {token}. Please pass a different"
+                " `placeholder_token` that is not already in the tokenizer."
+            )
+
+        placeholder_token_id = tokenizer.convert_tokens_to_ids(token)
+
+        placeholder_token_ids.append(placeholder_token_id)
+
+        # Load models and create wrapper for stable diffusion
+
+        text_encoder.resize_token_embeddings(len(tokenizer))
+        token_embeds = text_encoder.get_input_embeddings().weight.data
+        if init_tok == "<rand>":
+
+            token_embeds[placeholder_token_id] = torch.randn_like(
+                token_embeds[0]
+            ).clamp(-0.5, 0.5)
+        elif init_tok == "<zero>":
+            token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
+        else:
+            token_ids = tokenizer.encode(init_tok, add_special_tokens=False)
+            # Check if initializer_token is a single token or a sequence of tokens
+            if len(token_ids) > 1:
+                raise ValueError("The initializer token must be a single token.")
+
+            initializer_token_id = token_ids[0]
+            token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
 
     vae = AutoencoderKL.from_pretrained(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
@@ -99,7 +113,7 @@ def get_models(
         vae.to(device),
         unet.to(device),
         tokenizer,
-        placeholder_token_id,
+        placeholder_token_ids,
     )
 
 
@@ -186,8 +200,8 @@ def train_inversion(
     index_no_updates,
     optimizer,
     save_steps,
-    placeholder_token_id,
-    placeholder_token,
+    placeholder_token_ids,
+    placeholder_tokens,
     save_path,
 ):
 
@@ -222,8 +236,8 @@ def train_inversion(
                 save_all(
                     unet=unet,
                     text_encoder=text_encoder,
-                    placeholder_token_id=placeholder_token_id,
-                    placeholder_token=placeholder_token,
+                    placeholder_token_ids=placeholder_token_ids,
+                    placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(save_path, f"step_inv_{global_step}.pt"),
                     save_lora=False,
                 )
@@ -241,8 +255,8 @@ def perform_tuning(
     scheduler,
     optimizer,
     save_steps: int,
-    placeholder_token_id,
-    placeholder_token,
+    placeholder_token_ids,
+    placeholder_tokens,
     save_path,
 ):
 
@@ -273,8 +287,8 @@ def perform_tuning(
                 save_all(
                     unet,
                     text_encoder,
-                    placeholder_token_id=placeholder_token_id,
-                    placeholder_token=placeholder_token,
+                    placeholder_token_ids=placeholder_token_ids,
+                    placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(save_path, f"step_{global_step}.pt"),
                 )
                 moved = (
@@ -308,9 +322,10 @@ def train(
     class_data_dir: Optional[str] = None,
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
-    learnable_property: str = "object",  # not used
-    placeholder_token: str = "<s>",
-    initializer_token: str = "dog",
+    use_template: Optional[str] = Literal[None, "object", "style"],
+    placeholder_tokens: str = "<s>",
+    placeholder_token_at_data: Optional[str] = None,
+    initializer_tokens: str = "dog",
     class_prompt: Optional[str] = None,
     with_prior_preservation: bool = False,
     prior_loss_weight: float = 1.0,
@@ -333,6 +348,8 @@ def train(
     learning_rate_unet: float = 1e-5,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,
+    continue_inversion: bool = True,
+    continue_inversion_lr: Optional[float] = None,
     scale_lr: bool = False,
     lr_scheduler: str = "constant",
     lr_warmup_steps: int = 100,
@@ -345,14 +362,26 @@ def train(
 
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
+    # print(placeholder_tokens, initializer_tokens)
+    placeholder_tokens = placeholder_tokens.split("|")
+    initializer_tokens = initializer_tokens.split("|")
+
+    if placeholder_token_at_data is not None:
+        tok, pat = placeholder_token_at_data.split("|")
+        token_map = {tok: pat}
+
+    else:
+        token_map = None
+    print("Placeholder Tokens", placeholder_tokens)
+    print("Initializer Tokens", initializer_tokens)
 
     # get the models
-    text_encoder, vae, unet, tokenizer, placeholder_token_id = get_models(
+    text_encoder, vae, unet, tokenizer, placeholder_token_ids = get_models(
         pretrained_model_name_or_path,
         pretrained_vae_name_or_path,
         revision,
-        placeholder_token,
-        initializer_token,
+        placeholder_tokens,
+        initializer_tokens,
         device=device,
     )
 
@@ -377,8 +406,9 @@ def train(
 
     train_dataset = PivotalTuningDatasetCapation(
         instance_data_root=instance_data_dir,
-        placeholder_token=placeholder_token,
         stochastic_attribute=stochastic_attribute,
+        token_map=token_map,
+        use_template=use_template,
         class_data_root=class_data_dir if with_prior_preservation else None,
         class_prompt=class_prompt,
         tokenizer=tokenizer,
@@ -391,7 +421,10 @@ def train(
         train_dataset, train_batch_size, tokenizer, vae, text_encoder
     )
 
-    index_no_updates = torch.arange(len(tokenizer)) != placeholder_token_id
+    index_no_updates = torch.arange(len(tokenizer)) != placeholder_token_ids[0]
+
+    for tok_id in placeholder_token_ids:
+        index_no_updates[tok_id] = False
 
     unet.requires_grad_(False)
     vae.requires_grad_(False)
@@ -422,8 +455,8 @@ def train(
             index_no_updates=index_no_updates,
             optimizer=ti_optimizer,
             save_steps=save_steps,
-            placeholder_token=placeholder_token,
-            placeholder_token_id=placeholder_token_id,
+            placeholder_tokens=placeholder_tokens,
+            placeholder_token_ids=placeholder_token_ids,
             save_path=output_dir,
         )
 
@@ -442,6 +475,24 @@ def train(
     ]
 
     text_encoder.requires_grad_(False)
+
+    if continue_inversion:
+        params_to_optimize += [
+            {
+                "params": text_encoder.get_input_embeddings().parameters(),
+                "lr": continue_inversion_lr
+                if continue_inversion_lr is not None
+                else ti_lr,
+            }
+        ]
+        text_encoder.requires_grad_(True)
+        params_to_freeze = itertools.chain(
+            text_encoder.text_model.encoder.parameters(),
+            text_encoder.text_model.final_layer_norm.parameters(),
+            text_encoder.text_model.embeddings.position_embedding.parameters(),
+        )
+        for param in params_to_freeze:
+            param.requires_grad = False
 
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
@@ -472,8 +523,8 @@ def train(
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
         save_steps=save_steps,
-        placeholder_token=placeholder_token,
-        placeholder_token_id=placeholder_token_id,
+        placeholder_tokens=placeholder_tokens,
+        placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
     )
 

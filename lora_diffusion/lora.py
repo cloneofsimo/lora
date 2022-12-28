@@ -536,45 +536,57 @@ def _ti_lora_path(path: str) -> str:
 
 
 def load_learned_embed_in_clip(
-    learned_embeds_path, text_encoder, tokenizer, token=None, idempotent=False
+    learned_embeds_path,
+    text_encoder,
+    tokenizer,
+    token: Union[str, List[str]] = None,
+    idempotent=False,
 ):
     loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
 
-    # separate token and the embeds
-    trained_token = list(loaded_learned_embeds.keys())[0]
-    embeds = loaded_learned_embeds[trained_token]
+    if isinstance(token, str):
+        trained_tokens = [token]
+    elif isinstance(token, list):
+        assert len(loaded_learned_embeds.keys()) == len(
+            token
+        ), "The number of tokens and the number of embeds should be the same"
+        trained_tokens = token
+    else:
+        trained_tokens = list(loaded_learned_embeds.keys())
 
-    # cast to dtype of text_encoder
-    dtype = text_encoder.get_input_embeddings().weight.dtype
+    for token in trained_tokens:
+        print(token)
+        embeds = loaded_learned_embeds[token]
 
-    # add the token in tokenizer
-    token = token if token is not None else trained_token
-    num_added_tokens = tokenizer.add_tokens(token)
-    i = 1
-    if not idempotent:
-        while num_added_tokens == 0:
+        # cast to dtype of text_encoder
+        dtype = text_encoder.get_input_embeddings().weight.dtype
+        num_added_tokens = tokenizer.add_tokens(token)
+
+        i = 1
+        if not idempotent:
+            while num_added_tokens == 0:
+                print(f"The tokenizer already contains the token {token}.")
+                token = f"{token[:-1]}-{i}>"
+                print(f"Attempting to add the token {token}.")
+                num_added_tokens = tokenizer.add_tokens(token)
+                i += 1
+        elif num_added_tokens == 0 and idempotent:
             print(f"The tokenizer already contains the token {token}.")
-            token = f"{token[:-1]}-{i}>"
-            print(f"Attempting to add the token {token}.")
-            num_added_tokens = tokenizer.add_tokens(token)
-            i += 1
-    elif num_added_tokens == 0 and idempotent:
-        print(f"The tokenizer already contains the token {token}.")
-        print(f"Replacing {token} embedding.")
+            print(f"Replacing {token} embedding.")
 
-    # resize the token embeddings
-    text_encoder.resize_token_embeddings(len(tokenizer))
+        # resize the token embeddings
+        text_encoder.resize_token_embeddings(len(tokenizer))
 
-    # get the id for the token and assign the embeds
-    token_id = tokenizer.convert_tokens_to_ids(token)
-    text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+        # get the id for the token and assign the embeds
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        text_encoder.get_input_embeddings().weight.data[token_id] = embeds
     return token
 
 
 def patch_pipe(
     pipe,
     unet_path,
-    token: str,
+    token: Optional[str] = None,
     r: int = 4,
     patch_unet=True,
     patch_text=False,
@@ -583,9 +595,6 @@ def patch_pipe(
     unet_target_replace_module=DEFAULT_TARGET_REPLACE,
     text_target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
 ):
-    assert (
-        len(token) > 0
-    ), "Token cannot be empty. Input token non-empty token like <s>."
 
     ti_path = _ti_lora_path(unet_path)
     text_path = _text_lora_path(unet_path)
@@ -613,7 +622,7 @@ def patch_pipe(
             ti_path,
             pipe.text_encoder,
             pipe.tokenizer,
-            token,
+            token=token,
             idempotent=idempotent_token,
         )
 
@@ -641,8 +650,8 @@ def inspect_lora(model):
 def save_all(
     unet,
     text_encoder,
-    placeholder_token_id,
-    placeholder_token,
+    placeholder_token_ids,
+    placeholder_tokens,
     save_path,
     save_lora=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
@@ -651,10 +660,14 @@ def save_all(
 
     # save ti
     ti_path = _ti_lora_path(save_path)
-    learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_id]
-    print("Current Learned Embeddings: ", learned_embeds[:4])
+    learned_embeds_dict = {}
+    for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+        learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+        print(
+            f"Current Learned Embeddings for {tok}:, id {tok_id} ", learned_embeds[:4]
+        )
+        learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
-    learned_embeds_dict = {placeholder_token: learned_embeds.detach().cpu()}
     torch.save(learned_embeds_dict, ti_path)
     print("Ti saved to ", ti_path)
 
