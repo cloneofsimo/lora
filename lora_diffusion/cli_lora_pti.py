@@ -10,7 +10,7 @@ import os
 import random
 import re
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 import torch
 import torch.nn.functional as F
@@ -73,12 +73,6 @@ def get_models(
                 " `placeholder_token` that is not already in the tokenizer."
             )
 
-        token_ids = tokenizer.encode(init_tok, add_special_tokens=False)
-        # Check if initializer_token is a single token or a sequence of tokens
-        if len(token_ids) > 1:
-            raise ValueError("The initializer token must be a single token.")
-
-        initializer_token_id = token_ids[0]
         placeholder_token_id = tokenizer.convert_tokens_to_ids(token)
 
         placeholder_token_ids.append(placeholder_token_id)
@@ -87,7 +81,21 @@ def get_models(
 
         text_encoder.resize_token_embeddings(len(tokenizer))
         token_embeds = text_encoder.get_input_embeddings().weight.data
-        token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+        if init_tok == "<rand>":
+
+            token_embeds[placeholder_token_id] = torch.randn_like(
+                token_embeds[0]
+            ).clamp(-0.5, 0.5)
+        elif init_tok == "<zero>":
+            token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
+        else:
+            token_ids = tokenizer.encode(init_tok, add_special_tokens=False)
+            # Check if initializer_token is a single token or a sequence of tokens
+            if len(token_ids) > 1:
+                raise ValueError("The initializer token must be a single token.")
+
+            initializer_token_id = token_ids[0]
+            token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
 
     vae = AutoencoderKL.from_pretrained(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
@@ -314,7 +322,7 @@ def train(
     class_data_dir: Optional[str] = None,
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
-    learnable_property: str = "object",  # not used
+    use_template: Optional[str] = Literal[None, "object", "style"],
     placeholder_tokens: str = "<s>",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: str = "dog",
@@ -359,9 +367,9 @@ def train(
     initializer_tokens = initializer_tokens.split("|")
 
     if placeholder_token_at_data is not None:
-        token_map = {
-            placeholder_token_at_data: "".join(placeholder_tokens),
-        }
+        tok, pat = placeholder_token_at_data.split("|")
+        token_map = {tok: pat}
+
     else:
         token_map = None
     print("Placeholder Tokens", placeholder_tokens)
@@ -400,6 +408,7 @@ def train(
         instance_data_root=instance_data_dir,
         stochastic_attribute=stochastic_attribute,
         token_map=token_map,
+        use_template=use_template,
         class_data_root=class_data_dir if with_prior_preservation else None,
         class_prompt=class_prompt,
         tokenizer=tokenizer,
@@ -467,20 +476,6 @@ def train(
 
     text_encoder.requires_grad_(False)
 
-    if train_text_encoder:
-        text_encoder_lora_params, _ = inject_trainable_lora(
-            text_encoder,
-            target_replace_module=lora_clip_target_modules,
-            r=lora_rank,
-        )
-        params_to_optimize += [
-            {
-                "params": itertools.chain(*text_encoder_lora_params),
-                "lr": text_encoder_lr,
-            }
-        ]
-        inspect_lora(text_encoder)
-
     if continue_inversion:
         params_to_optimize += [
             {
@@ -498,6 +493,20 @@ def train(
         )
         for param in params_to_freeze:
             param.requires_grad = False
+
+    if train_text_encoder:
+        text_encoder_lora_params, _ = inject_trainable_lora(
+            text_encoder,
+            target_replace_module=lora_clip_target_modules,
+            r=lora_rank,
+        )
+        params_to_optimize += [
+            {
+                "params": itertools.chain(*text_encoder_lora_params),
+                "lr": text_encoder_lr,
+            }
+        ]
+        inspect_lora(text_encoder)
 
     lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
 
