@@ -641,8 +641,8 @@ def inspect_lora(model):
 def save_all(
     unet,
     text_encoder,
-    placeholder_token_id,
-    placeholder_token,
+    placeholder_token_ids,
+    placeholder_tokens,
     save_path,
     save_lora=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
@@ -651,10 +651,14 @@ def save_all(
 
     # save ti
     ti_path = _ti_lora_path(save_path)
-    learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_id]
-    print("Current Learned Embeddings: ", learned_embeds[:4])
+    learned_embeds_dict = {}
+    for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+        learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+        print(
+            f"Current Learned Embeddings for {tok}:, id {tok_id} ", learned_embeds[:4]
+        )
+        learned_embeds_dict[tok_id] = learned_embeds.detach().cpu()
 
-    learned_embeds_dict = {placeholder_token: learned_embeds.detach().cpu()}
     torch.save(learned_embeds_dict, ti_path)
     print("Ti saved to ", ti_path)
 

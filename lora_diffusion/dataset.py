@@ -1,6 +1,6 @@
 from torch.utils.data import Dataset
 
-
+from typing import List, Tuple, Dict, Union, Optional
 from PIL import Image
 from torchvision import transforms
 from pathlib import Path
@@ -193,9 +193,9 @@ class PivotalTuningDatasetCapation(Dataset):
     def __init__(
         self,
         instance_data_root,
-        placeholder_token,
         stochastic_attribute,
         tokenizer,
+        token_map: Optional[dict] = None,
         class_data_root=None,
         class_prompt=None,
         size=512,
@@ -215,9 +215,7 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
         self.num_instance_images = len(self.instance_images_path)
-
-        self.placeholder_token = placeholder_token
-
+        self.token_map = token_map
         self._length = self.num_instance_images
 
         if class_data_root is not None:
@@ -276,8 +274,10 @@ class PivotalTuningDatasetCapation(Dataset):
         example["instance_images"] = self.image_transforms(instance_image)
 
         text = self.instance_images_path[index % self.num_instance_images].stem
+        if self.token_map is not None:
+            for token, value in self.token_map.items():
+                text = text.replace(token, value)
 
-        # print(text)
         example["instance_prompt_ids"] = self.tokenizer(
             text,
             padding="do_not_pad",
