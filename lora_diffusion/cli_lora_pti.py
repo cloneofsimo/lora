@@ -142,10 +142,6 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
             "input_ids": input_ids,
             "pixel_values": pixel_values,
         }
-
-        if examples[0].get("mask", None) is not None:
-            batch["mask"] = torch.stack([example["mask"] for example in examples])
-
         return batch
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -153,15 +149,14 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
         batch_size=train_batch_size,
         shuffle=True,
         collate_fn=collate_fn,
+        num_workers=2,
     )
 
     return train_dataloader
 
 
 @torch.autocast("cuda")
-def loss_step(
-    batch, unet, vae, text_encoder, scheduler, weight_dtype, t_mutliplier=1.0
-):
+def loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype):
     latents = vae.encode(
         batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
     ).latent_dist.sample()
@@ -172,7 +167,7 @@ def loss_step(
 
     timesteps = torch.randint(
         0,
-        int(scheduler.config.num_train_timesteps * t_mutliplier),
+        scheduler.config.num_train_timesteps,
         (bsz,),
         device=latents.device,
     )
@@ -190,31 +185,6 @@ def loss_step(
         target = scheduler.get_velocity(latents, noise, timesteps)
     else:
         raise ValueError(f"Unknown prediction type {scheduler.config.prediction_type}")
-
-    if batch.get("mask", None) is not None:
-
-        mask = (
-            batch["mask"]
-            .to(model_pred.device)
-            .reshape(
-                model_pred.shape[0], 1, model_pred.shape[2] * 8, model_pred.shape[3] * 8
-            )
-        )
-        # resize to match model_pred
-        mask = (
-            F.interpolate(
-                mask.float(),
-                size=model_pred.shape[-2:],
-                mode="nearest",
-            )
-            + 0.1
-        )
-
-        mask = mask / mask.mean()
-
-        model_pred = model_pred * mask
-
-        target = target * mask
 
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
     return loss
@@ -303,15 +273,7 @@ def perform_tuning(
         for batch in dataloader:
             optimizer.zero_grad()
 
-            loss = loss_step(
-                batch,
-                unet,
-                vae,
-                text_encoder,
-                scheduler,
-                weight_dtype,
-                t_mutliplier=0.8,
-            )
+            loss = loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
@@ -360,7 +322,7 @@ def train(
     class_data_dir: Optional[str] = None,
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
-    use_template: Literal[None, "object", "style"] = None,
+    use_template: Optional[str] = Literal[None, "object", "style"],
     placeholder_tokens: str = "<s>",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: str = "dog",
@@ -370,6 +332,7 @@ def train(
     num_class_images: int = 100,
     seed: int = 42,
     resolution: int = 512,
+    center_crop: bool = False,
     color_jitter: bool = True,
     train_batch_size: int = 1,
     sample_batch_size: int = 1,
@@ -387,7 +350,6 @@ def train(
     learning_rate_ti: float = 5e-4,
     continue_inversion: bool = True,
     continue_inversion_lr: Optional[float] = None,
-    use_face_segmentation_condition: bool = False,
     scale_lr: bool = False,
     lr_scheduler: str = "constant",
     lr_warmup_steps: int = 100,
@@ -451,8 +413,8 @@ def train(
         class_prompt=class_prompt,
         tokenizer=tokenizer,
         size=resolution,
+        center_crop=center_crop,
         color_jitter=color_jitter,
-        use_face_segmentation_condition=use_face_segmentation_condition,
     )
 
     train_dataloader = text2img_dataloader(
