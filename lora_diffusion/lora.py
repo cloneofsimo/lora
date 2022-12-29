@@ -654,22 +654,25 @@ def save_all(
     placeholder_tokens,
     save_path,
     save_lora=True,
+    save_ti=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
     target_replace_module_unet=DEFAULT_TARGET_REPLACE,
 ):
 
     # save ti
-    ti_path = _ti_lora_path(save_path)
-    learned_embeds_dict = {}
-    for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
-        learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
-        print(
-            f"Current Learned Embeddings for {tok}:, id {tok_id} ", learned_embeds[:4]
-        )
-        learned_embeds_dict[tok] = learned_embeds.detach().cpu()
+    if save_ti:
+        ti_path = _ti_lora_path(save_path)
+        learned_embeds_dict = {}
+        for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+            learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+            print(
+                f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                learned_embeds[:4],
+            )
+            learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
-    torch.save(learned_embeds_dict, ti_path)
-    print("Ti saved to ", ti_path)
+        torch.save(learned_embeds_dict, ti_path)
+        print("Ti saved to ", ti_path)
 
     # save text encoder
     if save_lora:
