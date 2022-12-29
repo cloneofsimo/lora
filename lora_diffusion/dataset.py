@@ -1,11 +1,12 @@
 from torch.utils.data import Dataset
 
 from typing import List, Tuple, Dict, Union, Optional
-from PIL import Image
+from PIL import Image, ImageFilter
 from torchvision import transforms
 from pathlib import Path
-
+import cv2
 import random
+import numpy as np
 
 OBJECT_TEMPLATE = [
     "a photo of a {}",
@@ -90,12 +91,12 @@ class PivotalTuningDatasetCapation(Dataset):
         class_prompt=None,
         size=512,
         h_flip=True,
-        center_crop=False,
         color_jitter=False,
         resize=True,
+        use_face_segmentation_condition=False,
+        blur_amount: int = 70,
     ):
         self.size = size
-        self.center_crop = center_crop
         self.tokenizer = tokenizer
         self.resize = resize
 
@@ -121,7 +122,7 @@ class PivotalTuningDatasetCapation(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
-
+        self.h_flip = h_flip
         self.image_transforms = transforms.Compose(
             [
                 transforms.Resize(
@@ -129,16 +130,23 @@ class PivotalTuningDatasetCapation(Dataset):
                 )
                 if resize
                 else transforms.Lambda(lambda x: x),
-                transforms.ColorJitter(0.2, 0.1)
+                transforms.ColorJitter(0.1, 0.1)
                 if color_jitter
-                else transforms.Lambda(lambda x: x),
-                transforms.RandomHorizontalFlip()
-                if h_flip
                 else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+
+        self.use_face_segmentation_condition = use_face_segmentation_condition
+        if self.use_face_segmentation_condition:
+            import mediapipe as mp
+
+            mp_face_detection = mp.solutions.face_detection
+            self.face_detection = mp_face_detection.FaceDetection(
+                model_selection=1, min_detection_confidence=0.5
+            )
+        self.blur_amount = blur_amount
 
     def __len__(self):
         return self._length
@@ -162,6 +170,61 @@ class PivotalTuningDatasetCapation(Dataset):
             if self.token_map is not None:
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
+
+        print(text)
+
+        if self.use_face_segmentation_condition:
+            image = cv2.imread(
+                str(self.instance_images_path[index % self.num_instance_images])
+            )
+            results = self.face_detection.process(
+                cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            )
+            black_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
+
+            if results.detections:
+
+                for detection in results.detections:
+
+                    x_min = int(
+                        detection.location_data.relative_bounding_box.xmin
+                        * image.shape[1]
+                    )
+                    y_min = int(
+                        detection.location_data.relative_bounding_box.ymin
+                        * image.shape[0]
+                    )
+                    width = int(
+                        detection.location_data.relative_bounding_box.width
+                        * image.shape[1]
+                    )
+                    height = int(
+                        detection.location_data.relative_bounding_box.height
+                        * image.shape[0]
+                    )
+
+                    # draw the colored rectangle
+                    black_image[y_min : y_min + height, x_min : x_min + width] = 255
+
+            # blur the image
+            black_image = Image.fromarray(black_image, mode="L").filter(
+                ImageFilter.GaussianBlur(radius=self.blur_amount)
+            )
+            # to tensor
+            black_image = transforms.ToTensor()(black_image)
+            # resize as the instance image
+            black_image = transforms.Resize(
+                self.size, interpolation=transforms.InterpolationMode.BILINEAR
+            )(black_image)
+
+            example["mask"] = black_image
+
+        if self.h_flip and random.random() > 0.5:
+            hflip = transforms.RandomHorizontalFlip(p=1)
+
+            example["instance_images"] = hflip(example["instance_images"])
+            if self.use_face_segmentation_condition:
+                example["mask"] = hflip(example["mask"])
 
         example["instance_prompt_ids"] = self.tokenizer(
             text,
