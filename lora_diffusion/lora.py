@@ -1,36 +1,42 @@
-import math
 from itertools import groupby
-from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
-import numpy as np
-import PIL
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4):
+    """
+    Injects and initialises lora_rank Linear layers
+    """
+
+    def __init__(self, in_features, out_features, bias=False, lora_rank=4):
         super().__init__()
 
-        if r > min(in_features, out_features):
+        if lora_rank > min(in_features, out_features):
             raise ValueError(
-                f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
+                f"LoRA rank {lora_rank} must be less or equal than \
+                {min(in_features, out_features)}"
             )
 
         self.linear = nn.Linear(in_features, out_features, bias)
-        self.lora_down = nn.Linear(in_features, r, bias=False)
-        self.lora_up = nn.Linear(r, out_features, bias=False)
+        self.lora_down = nn.Linear(in_features, lora_rank, bias=False)
+        self.lora_up = nn.Linear(lora_rank, out_features, bias=False)
         self.scale = 1.0
 
-        nn.init.normal_(self.lora_down.weight, std=1 / r)
+        nn.init.normal_(self.lora_down.weight, std=1 / lora_rank)
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
-        return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
+        return self.linear(input) + \
+            self.lora_up(self.lora_down(input)) * self.scale
 
 
+# Default layers to replace in UNet
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
+
+# Default layers to replace in Text Encoder
 TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
 
 DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
@@ -46,18 +52,20 @@ def _find_children(
     Returns all matching modules, along with the parent of those moduless and the
     names they are referenced by.
     """
-    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    # For each target find every linear_class module that isn't a child of a
+    # LoraInjectedLinear
     for parent in model.modules():
         for name, module in parent.named_children():
             if any([isinstance(module, _class) for _class in search_class]):
                 yield parent, name, module
 
 
-def _find_modules_v2(
+def _find_modules(
     model,
     ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
     search_class: List[Type[nn.Module]] = [nn.Linear],
-    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [
+        LoraInjectedLinear],
 ):
     """
     Find all modules of a certain class (or union of classes) that are direct or
@@ -74,42 +82,25 @@ def _find_modules_v2(
         if module.__class__.__name__ in ancestor_class
     )
 
-    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    # For each target find every linear_class module that isn't a child of a
+    # LoraInjectedLinear
     for ancestor in ancestors:
         for fullname, module in ancestor.named_modules():
             if any([isinstance(module, _class) for _class in search_class]):
-                # Find the direct parent if this is a descendant, not a child, of target
+                # Find the direct parent if this is a descendant, not a child,
+                # of target
                 *path, name = fullname.split(".")
                 parent = ancestor
                 while path:
                     parent = parent.get_submodule(path.pop(0))
                 # Skip this linear if it's a child of a LoraInjectedLinear
                 if exclude_children_of and any(
-                    [isinstance(parent, _class) for _class in exclude_children_of]
+                    [isinstance(parent, _class)
+                     for _class in exclude_children_of]
                 ):
                     continue
                 # Otherwise, yield it
                 yield parent, name, module
-
-
-def _find_modules_old(
-    model,
-    ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
-    search_class: List[Type[nn.Module]] = [nn.Linear],
-    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
-):
-    ret = []
-    for _module in model.modules():
-        if _module.__class__.__name__ in ancestor_class:
-
-            for name, _child_module in _module.named_modules():
-                if _child_module.__class__ in search_class:
-                    ret.append((_module, name, _child_module))
-    print(ret)
-    return ret
-
-
-_find_modules = _find_modules_v2
 
 
 def inject_trainable_lora(
@@ -125,7 +116,7 @@ def inject_trainable_lora(
     require_grad_params = []
     names = []
 
-    if loras != None:
+    if loras is not None:
         loras = torch.load(loras)
 
     for _module, name, _child_module in _find_modules(
@@ -148,9 +139,10 @@ def inject_trainable_lora(
         _module._modules[name] = _tmp
 
         require_grad_params.append(_module._modules[name].lora_up.parameters())
-        require_grad_params.append(_module._modules[name].lora_down.parameters())
+        require_grad_params.append(
+            _module._modules[name].lora_down.parameters())
 
-        if loras != None:
+        if loras is not None:
             _module._modules[name].lora_up.weight = loras.pop(0)
             _module._modules[name].lora_down.weight = loras.pop(0)
 
@@ -178,7 +170,7 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
 
 def save_lora_weight(
     model,
-    path="./lora.pt",
+    path: Union[str, Path] = "./lora.pt",
     target_replace_module=DEFAULT_TARGET_REPLACE,
 ):
     weights = []
@@ -237,7 +229,7 @@ def save_safeloras(
 
 def convert_loras_to_safeloras(
     modelmap: Dict[str, Tuple[str, Set[str], int]] = {},
-    outpath="./lora.safetensors",
+    outpath: Union[str, Path] = "./lora.safetensors",
 ):
     """
     Converts the Lora from multiple pytorch .pt files into a single safetensor file.
@@ -293,7 +285,8 @@ def parse_safeloras(
 
     metadata = safeloras.metadata()
 
-    get_name = lambda k: k.split(":")[0]
+    def get_name(k):
+        return k.split(":")[0]
 
     keys = list(safeloras.keys())
     keys.sort(key=get_name)
@@ -302,7 +295,8 @@ def parse_safeloras(
         # Extract the targets
         target = json.loads(metadata[name])
 
-        # Build the result lists - Python needs us to preallocate lists to insert into them
+        # Build the result lists - Python needs us to preallocate lists to
+        # insert into them
         module_keys = list(module_keys)
         ranks = [None] * (len(module_keys) // 2)
         weights = [None] * len(module_keys)
@@ -325,7 +319,9 @@ def parse_safeloras(
 
 
 def load_safeloras(path, device="cpu"):
-
+    """
+    Load a LoRA using safetensors
+    """
     from safetensors.torch import safe_open
 
     safeloras = safe_open(path, framework="pt", device=device)
@@ -426,7 +422,8 @@ def monkeypatch_or_replace_lora(
     r: Union[int, List[int]] = 4,
 ):
     for _module, name, _child_module in _find_modules(
-        model, target_replace_module, search_class=[nn.Linear, LoraInjectedLinear]
+        model, target_replace_module, search_class=[
+            nn.Linear, LoraInjectedLinear]
     ):
         _source = (
             _child_module.linear
@@ -483,7 +480,10 @@ def monkeypatch_remove_lora(model):
         _source = _child_module.linear
         weight, bias = _source.weight, _source.bias
 
-        _tmp = nn.Linear(_source.in_features, _source.out_features, bias is not None)
+        _tmp = nn.Linear(
+            _source.in_features,
+            _source.out_features,
+            bias is not None)
 
         _tmp.weight = weight
         if bias is not None:
@@ -525,18 +525,18 @@ def tune_lora_scale(model, alpha: float = 1.0):
             _module.scale = alpha
 
 
-def _text_lora_path(path: str) -> str:
+def _text_lora_path(path: Union[str, Path]) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
     return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
 
 
-def _ti_lora_path(path: str) -> str:
+def _ti_lora_path(path: Union[str, Path]) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
     return ".".join(path.split(".")[:-1] + ["ti", "pt"])
 
 
 def load_learned_embed_in_clip(
-    learned_embeds_path,
+    learned_embeds_path: Union[str, Path],
     text_encoder,
     tokenizer,
     token: Union[str, List[str]] = None,
@@ -585,7 +585,7 @@ def load_learned_embed_in_clip(
 
 def patch_pipe(
     pipe,
-    unet_path,
+    unet_path: Union[str, Path],
     token: Optional[str] = None,
     r: int = 4,
     patch_unet=True,
@@ -652,24 +652,24 @@ def save_all(
     text_encoder,
     placeholder_token_ids,
     placeholder_tokens,
-    save_path,
+    save_path: Union[str, Path],
     save_lora=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
     target_replace_module_unet=DEFAULT_TARGET_REPLACE,
 ):
 
-    # save ti
+    # save textual inversion
     ti_path = _ti_lora_path(save_path)
     learned_embeds_dict = {}
     for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
         learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
         print(
-            f"Current Learned Embeddings for {tok}:, id {tok_id} ", learned_embeds[:4]
+            f"Current Learned Embeddings for {tok}:, id {tok_id} {learned_embeds[:4]}"
         )
         learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
     torch.save(learned_embeds_dict, ti_path)
-    print("Ti saved to ", ti_path)
+    print(f"Textual Inversion saved to {ti_path}")
 
     # save text encoder
     if save_lora:
@@ -677,11 +677,11 @@ def save_all(
         save_lora_weight(
             unet, save_path, target_replace_module=target_replace_module_unet
         )
-        print("Unet saved to ", save_path)
+        print(f"Unet saved to {save_path}")
 
         save_lora_weight(
             text_encoder,
             _text_lora_path(save_path),
             target_replace_module=target_replace_module_text,
         )
-        print("Text Encoder saved to ", _text_lora_path(save_path))
+        print(f"Text Encoder saved to {_text_lora_path(save_path)}")

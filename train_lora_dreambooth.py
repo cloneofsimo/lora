@@ -3,18 +3,15 @@
 
 import argparse
 import hashlib
+import inspect
 import itertools
 import math
 import os
-import inspect
 from pathlib import Path
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
-
-
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import set_seed
@@ -25,8 +22,9 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from diffusers.optimization import get_scheduler
-from huggingface_hub import HfFolder, Repository, whoami
-
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
@@ -36,15 +34,6 @@ from lora_diffusion import (
     save_lora_weight,
     save_safeloras,
 )
-
-from torch.utils.data import Dataset
-from PIL import Image
-from torchvision import transforms
-
-from pathlib import Path
-
-import random
-import re
 
 
 class DreamBoothDataset(Dataset):
@@ -182,7 +171,8 @@ logger = get_logger(__name__)
 
 
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="Simple example of a training script.")
+    parser = argparse.ArgumentParser(
+        description="Simple example of a training script.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -462,7 +452,8 @@ def parse_args(input_args=None):
 
     if args.with_prior_preservation:
         if args.class_data_dir is None:
-            raise ValueError("You must specify a data directory for class images.")
+            raise ValueError(
+                "You must specify a data directory for class images.")
         if args.class_prompt is None:
             raise ValueError("You must specify prompt for class images.")
     else:
@@ -490,7 +481,8 @@ def main(args):
 
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
     # This will be enabled soon in accelerate. For now, we don't allow gradient accumulation when training two models.
-    # TODO (patil-suraj): Remove this check when gradient accumulation with two models is enabled in accelerate.
+    # TODO (patil-suraj): Remove this check when gradient accumulation with
+    # two models is enabled in accelerate.
     if (
         args.train_text_encoder
         and args.gradient_accumulation_steps > 1
@@ -609,7 +601,9 @@ def main(args):
         for _up, _down in extract_lora_ups_down(
             text_encoder, target_replace_module=["CLIPAttention"]
         ):
-            print("Before training: text encoder First Layer lora up", _up.weight.data)
+            print(
+                "Before training: text encoder First Layer lora up",
+                _up.weight.data)
             print(
                 "Before training: text encoder First Layer lora down", _down.weight.data
             )
@@ -628,7 +622,8 @@ def main(args):
             * accelerator.num_processes
         )
 
-    # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB GPUs
+    # Use 8-bit Adam for lower memory usage or to fine-tune the model in 16GB
+    # GPUs
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
@@ -649,7 +644,8 @@ def main(args):
 
     params_to_optimize = (
         [
-            {"params": itertools.chain(*unet_lora_params), "lr": args.learning_rate},
+            {"params": itertools.chain(
+                *unet_lora_params), "lr": args.learning_rate},
             {
                 "params": itertools.chain(*text_encoder_lora_params),
                 "lr": text_lr,
@@ -693,7 +689,8 @@ def main(args):
             pixel_values += [example["class_images"] for example in examples]
 
         pixel_values = torch.stack(pixel_values)
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+        pixel_values = pixel_values.to(
+            memory_format=torch.contiguous_format).float()
 
         input_ids = tokenizer.pad(
             {"input_ids": input_ids},
@@ -755,19 +752,23 @@ def main(args):
 
     # Move text_encode and vae to gpu.
     # For mixed precision training we cast the text_encoder and vae weights to half-precision
-    # as these models are only used for inference, keeping weights in full precision is not required.
+    # as these models are only used for inference, keeping weights in full
+    # precision is not required.
     vae.to(accelerator.device, dtype=weight_dtype)
     if not args.train_text_encoder:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
 
-    # We need to recalculate our total training steps as the size of the training dataloader may have changed.
+    # We need to recalculate our total training steps as the size of the
+    # training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(
         len(train_dataloader) / args.gradient_accumulation_steps
     )
     if overrode_max_train_steps:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
-    args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    args.num_train_epochs = math.ceil(
+        args.max_train_steps /
+        num_update_steps_per_epoch)
 
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
@@ -789,7 +790,8 @@ def main(args):
     print(
         f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
     )
-    print(f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
+    print(
+        f"  Gradient Accumulation steps = {args.gradient_accumulation_steps}")
     print(f"  Total optimization steps = {args.max_train_steps}")
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(
@@ -825,32 +827,42 @@ def main(args):
 
             # Add noise to the latents according to the noise magnitude at each timestep
             # (this is the forward diffusion process)
-            noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+            noisy_latents = noise_scheduler.add_noise(
+                latents, noise, timesteps)
 
             # Get the text embedding for conditioning
             encoder_hidden_states = text_encoder(batch["input_ids"])[0]
 
             # Predict the noise residual
-            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+            model_pred = unet(
+                noisy_latents,
+                timesteps,
+                encoder_hidden_states).sample
 
             # Get the target for loss depending on the prediction type
             if noise_scheduler.config.prediction_type == "epsilon":
                 target = noise
             elif noise_scheduler.config.prediction_type == "v_prediction":
-                target = noise_scheduler.get_velocity(latents, noise, timesteps)
+                target = noise_scheduler.get_velocity(
+                    latents, noise, timesteps)
             else:
                 raise ValueError(
                     f"Unknown prediction type {noise_scheduler.config.prediction_type}"
                 )
 
             if args.with_prior_preservation:
-                # Chunk the noise and model_pred into two parts and compute the loss on each part separately.
-                model_pred, model_pred_prior = torch.chunk(model_pred, 2, dim=0)
+                # Chunk the noise and model_pred into two parts and compute the
+                # loss on each part separately.
+                model_pred, model_pred_prior = torch.chunk(
+                    model_pred, 2, dim=0)
                 target, target_prior = torch.chunk(target, 2, dim=0)
 
                 # Compute instance loss
                 loss = (
-                    F.mse_loss(model_pred.float(), target.float(), reduction="none")
+                    F.mse_loss(
+                        model_pred.float(),
+                        target.float(),
+                        reduction="none")
                     .mean([1, 2, 3])
                     .mean()
                 )
@@ -863,12 +875,17 @@ def main(args):
                 # Add the prior loss to the instance loss.
                 loss = loss + args.prior_loss_weight * prior_loss
             else:
-                loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                loss = F.mse_loss(
+                    model_pred.float(),
+                    target.float(),
+                    reduction="mean")
 
             accelerator.backward(loss)
             if accelerator.sync_gradients:
                 params_to_clip = (
-                    itertools.chain(unet.parameters(), text_encoder.parameters())
+                    itertools.chain(
+                        unet.parameters(),
+                        text_encoder.parameters())
                     if args.train_text_encoder
                     else unet.parameters()
                 )
@@ -880,7 +897,8 @@ def main(args):
 
             global_step += 1
 
-            # Checks if the accelerator has performed an optimization step behind the scenes
+            # Checks if the accelerator has performed an optimization step
+            # behind the scenes
             if accelerator.sync_gradients:
                 if args.save_steps and global_step - last_save >= args.save_steps:
                     if accelerator.is_main_process:
@@ -911,7 +929,8 @@ def main(args):
                             f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.pt"
                         )
                         filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
-                        print(f"save weights {filename_unet}, {filename_text_encoder}")
+                        print(
+                            f"save weights {filename_unet}, {filename_text_encoder}")
                         save_lora_weight(pipeline.unet, filename_unet)
                         if args.train_text_encoder:
                             save_lora_weight(
@@ -947,7 +966,9 @@ def main(args):
 
                         last_save = global_step
 
-            logs = {"loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
+            logs = {
+                "loss": loss.detach().item(),
+                "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
             accelerator.log(logs, step=global_step)
 

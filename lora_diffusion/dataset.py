@@ -1,11 +1,10 @@
-from torch.utils.data import Dataset
-
-from typing import List, Tuple, Dict, Union, Optional
-from PIL import Image
-from torchvision import transforms
-from pathlib import Path
-
 import random
+from pathlib import Path
+from typing import Optional
+
+from PIL import Image
+from torch.utils.data import Dataset
+from torchvision import transforms
 
 OBJECT_TEMPLATE = [
     "a photo of a {}",
@@ -75,7 +74,8 @@ def _shuffle(lis):
 
 class PivotalTuningDatasetCapation(Dataset):
     """
-    A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
+    A dataset to prepare the instance and class images
+    with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
     """
 
@@ -89,7 +89,7 @@ class PivotalTuningDatasetCapation(Dataset):
         class_data_root=None,
         class_prompt=None,
         size=512,
-        h_flip=True,
+        horizontal_flip=True,
         center_crop=False,
         color_jitter=False,
         resize=True,
@@ -101,7 +101,7 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
-            raise ValueError("Instance images root doesn't exists.")
+            raise ValueError("Instance images path doesn't exist.")
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
         self.num_instance_images = len(self.instance_images_path)
@@ -129,11 +129,11 @@ class PivotalTuningDatasetCapation(Dataset):
                 )
                 if resize
                 else transforms.Lambda(lambda x: x),
-                transforms.ColorJitter(0.2, 0.1)
+                transforms.ColorJitter(brightness=0.2, contrast=0.1)
                 if color_jitter
                 else transforms.Lambda(lambda x: x),
                 transforms.RandomHorizontalFlip()
-                if h_flip
+                if horizontal_flip
                 else transforms.Lambda(lambda x: x),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
@@ -158,7 +158,8 @@ class PivotalTuningDatasetCapation(Dataset):
 
             text = random.choice(self.templates).format(input_tok)
         else:
-            text = self.instance_images_path[index % self.num_instance_images].stem
+            text = self.instance_images_path[index %
+                                             self.num_instance_images].stem
             if self.token_map is not None:
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)

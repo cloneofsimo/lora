@@ -3,11 +3,9 @@
 # *Only* converts the UNet, VAE, and Text Encoder.
 # Does not convert optimizer state or any other thing.
 # Written by jachiam
-import argparse
 import os.path as osp
 
 import torch
-
 
 # =================#
 # UNet Conversion #
@@ -47,13 +45,15 @@ for i in range(4):
         # loop over resnets/attentions for downblocks
         hf_down_res_prefix = f"down_blocks.{i}.resnets.{j}."
         sd_down_res_prefix = f"input_blocks.{3*i + j + 1}.0."
-        unet_conversion_map_layer.append((sd_down_res_prefix, hf_down_res_prefix))
+        unet_conversion_map_layer.append(
+            (sd_down_res_prefix, hf_down_res_prefix))
 
         if i < 3:
             # no attention layers in down_blocks.3
             hf_down_atn_prefix = f"down_blocks.{i}.attentions.{j}."
             sd_down_atn_prefix = f"input_blocks.{3*i + j + 1}.1."
-            unet_conversion_map_layer.append((sd_down_atn_prefix, hf_down_atn_prefix))
+            unet_conversion_map_layer.append(
+                (sd_down_atn_prefix, hf_down_atn_prefix))
 
     for j in range(3):
         # loop over resnets/attentions for upblocks
@@ -65,18 +65,21 @@ for i in range(4):
             # no attention layers in up_blocks.0
             hf_up_atn_prefix = f"up_blocks.{i}.attentions.{j}."
             sd_up_atn_prefix = f"output_blocks.{3*i + j}.1."
-            unet_conversion_map_layer.append((sd_up_atn_prefix, hf_up_atn_prefix))
+            unet_conversion_map_layer.append(
+                (sd_up_atn_prefix, hf_up_atn_prefix))
 
     if i < 3:
         # no downsample in down_blocks.3
         hf_downsample_prefix = f"down_blocks.{i}.downsamplers.0.conv."
         sd_downsample_prefix = f"input_blocks.{3*(i+1)}.0.op."
-        unet_conversion_map_layer.append((sd_downsample_prefix, hf_downsample_prefix))
+        unet_conversion_map_layer.append(
+            (sd_downsample_prefix, hf_downsample_prefix))
 
         # no upsample in up_blocks.3
         hf_upsample_prefix = f"up_blocks.{i}.upsamplers.0."
         sd_upsample_prefix = f"output_blocks.{3*i + 2}.{1 if i == 0 else 2}."
-        unet_conversion_map_layer.append((sd_upsample_prefix, hf_upsample_prefix))
+        unet_conversion_map_layer.append(
+            (sd_upsample_prefix, hf_upsample_prefix))
 
 hf_mid_atn_prefix = "mid_block.attentions.0."
 sd_mid_atn_prefix = "middle_block.1."
@@ -215,7 +218,9 @@ def convert_to_ckpt(model_path, checkpoint_path, as_half):
     # Convert the VAE model
     vae_state_dict = torch.load(vae_path, map_location="cpu")
     vae_state_dict = convert_vae_state_dict(vae_state_dict)
-    vae_state_dict = {"first_stage_model." + k: v for k, v in vae_state_dict.items()}
+    vae_state_dict = {
+        "first_stage_model." + k: v for k,
+        v in vae_state_dict.items()}
 
     # Convert the text encoder model
     text_enc_dict = torch.load(text_enc_path, map_location="cpu")
