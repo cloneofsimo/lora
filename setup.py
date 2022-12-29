@@ -7,7 +7,8 @@ setup(
     name="lora_diffusion",
     py_modules=["lora_diffusion"],
     version="0.0.7",
-    description="Low Rank Adaptation for Diffusion Models. Works with Stable Diffusion out-of-the-box.",
+    description="Low Rank Adaptation for Diffusion Models. \
+                Works with Stable Diffusion out-of-the-box.",
     author="Simo Ryu",
     packages=find_packages(),
     entry_points={
