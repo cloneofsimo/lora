@@ -67,19 +67,22 @@ def text_img_alignment(img_embeds, text_embeds, target_img_embeds):
     )
 
     # image alignment
-    avg_img_embed = (img_embeds / img_embeds.norm(dim=-1, keepdim=True)).mean(dim=0)
-    avg_target_img_embed = (
-        target_img_embeds / target_img_embeds.norm(dim=-1, keepdim=True)
-    ).mean(dim=0)
+    img_embed_normalized = img_embeds / img_embeds.norm(dim=-1, keepdim=True)
 
-    img_img_sim = (avg_img_embed * avg_target_img_embed).sum() / (
-        avg_img_embed.norm() * avg_target_img_embed.norm()
+    avg_target_img_embed = (
+        (target_img_embeds / target_img_embeds.norm(dim=-1, keepdim=True))
+        .mean(dim=0)
+        .unsqueeze(0)
+        .repeat(img_embeds.shape[0], 1)
     )
+
+    img_img_sim = (img_embed_normalized * avg_target_img_embed).sum(dim=-1)
 
     return {
         "text_alignment_avg": text_img_sim.mean().item(),
-        "image_alignment_avg": img_img_sim.item(),
+        "image_alignment_avg": img_img_sim.sum().item(),
         "text_alignment_all": text_img_sim.tolist(),
+        "image_alignment_all": img_img_sim.tolist(),
     }
 
 
@@ -118,9 +121,10 @@ def evaluate_pipe(
     for prompt in EXAMPLE_PROMPTS[:n_test]:
         prompt = prompt.replace("<obj>", learnt_token)
         torch.manual_seed(seed)
-        img = pipe(
-            prompt, num_inference_steps=n_step, guidance_scale=guidance_scale
-        ).images[0]
+        with torch.autocast("cuda"):
+            img = pipe(
+                prompt, num_inference_steps=n_step, guidance_scale=guidance_scale
+            ).images[0]
         images.append(img)
 
         # image

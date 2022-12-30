@@ -81,11 +81,17 @@ def get_models(
 
         text_encoder.resize_token_embeddings(len(tokenizer))
         token_embeds = text_encoder.get_input_embeddings().weight.data
-        if init_tok == "<rand>":
+        if init_tok.startswith("<rand"):
+            # <rand-"sigma">, e.g. <rand-0.5>
+            sigma_val = float(re.findall(r"<rand-(.*)>", init_tok)[0])
 
-            token_embeds[placeholder_token_id] = torch.randn_like(
-                token_embeds[0]
-            ).clamp(-0.5, 0.5)
+            token_embeds[placeholder_token_id] = (
+                torch.randn_like(token_embeds[0]) * sigma_val
+            )
+            print(
+                f"Initialized {token} with random noise (sigma={sigma_val}), empirically {token_embeds[placeholder_token_id].mean().item():.3f} +- {token_embeds[placeholder_token_id].std().item():.3f}"
+            )
+
         elif init_tok == "<zero>":
             token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
         else:
@@ -207,7 +213,7 @@ def loss_step(
                 size=model_pred.shape[-2:],
                 mode="nearest",
             )
-            + 0.1
+            + 0.05
         )
 
         mask = mask / mask.mean()
@@ -455,6 +461,8 @@ def train(
         use_face_segmentation_condition=use_face_segmentation_condition,
     )
 
+    train_dataset.blur_amount = 200
+
     train_dataloader = text2img_dataloader(
         train_dataset, train_batch_size, tokenizer, vae, text_encoder
     )
@@ -551,6 +559,8 @@ def train(
     unet.train()
     if train_text_encoder:
         text_encoder.train()
+
+    train_dataset.blur_amount = 70
 
     perform_tuning(
         unet,
