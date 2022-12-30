@@ -80,7 +80,7 @@ def text_img_alignment(img_embeds, text_embeds, target_img_embeds):
 
     return {
         "text_alignment_avg": text_img_sim.mean().item(),
-        "image_alignment_avg": img_img_sim.sum().item(),
+        "image_alignment_avg": img_img_sim.mean().item(),
         "text_alignment_all": text_img_sim.tolist(),
         "image_alignment_all": img_img_sim.tolist(),
     }
