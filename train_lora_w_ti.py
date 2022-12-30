@@ -32,9 +32,11 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from lora_diffusion import (
-    inject_trainable_lora,
-    save_lora_weight,
     extract_lora_ups_down,
+    inject_trainable_lora,
+    safetensors_available,
+    save_lora_weight,
+    save_safeloras_with_embeds,
 )
 from lora_diffusion.xformers_utils import set_use_memory_efficient_attention_xformers
 from PIL import Image
@@ -370,6 +372,13 @@ def parse_args(input_args=None):
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
+        "--output_format",
+        type=str,
+        choices=["pt", "safe", "both"],
+        default="both",
+        help="The output format of the model predicitions and checkpoints.",
+    )
+    parser.add_argument(
         "--seed", type=int, default=None, help="A seed for reproducible training."
     )
     parser.add_argument(
@@ -601,6 +610,17 @@ def parse_args(input_args=None):
         if args.class_prompt is not None:
             logger.warning(
                 "You need not use --class_prompt without --with_prior_preservation."
+            )
+
+    if not safetensors_available:
+        if args.output_format == "both":
+            print(
+                "Safetensors is not available - changing output format to just output PyTorch files"
+            )
+            args.output_format = "pt"
+        elif args.output_format == "safe":
+            raise ValueError(
+                "Safetensors is not available - either install it, or change output_format."
             )
 
     return args
@@ -1155,13 +1175,31 @@ def main(args):
 
         print("\n\nLora TRAINING DONE!\n\n")
 
-        save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
+        if args.output_format == "pt" or args.output_format == "both":
+            save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
 
-        save_lora_weight(
-            text_encoder,
-            args.output_dir + "/lora_weight.text_encoder.pt",
-            target_replace_module=["CLIPAttention"],
-        )
+            save_lora_weight(
+                text_encoder,
+                args.output_dir + "/lora_weight.text_encoder.pt",
+                target_replace_module=["CLIPAttention"],
+            )
+
+        if args.output_format == "safe" or args.output_format == "both":
+            loras = {}
+            loras["unet"] = (pipeline.unet, {"CrossAttention", "Attention", "GEGLU"})
+            loras["text_encoder"] = (pipeline.text_encoder, {"CLIPAttention"})
+
+            learned_embeds = (
+                accelerator.unwrap_model(text_encoder)
+                .get_input_embeddings()
+                .weight[placeholder_token_id]
+            )
+
+            embeds = {args.placeholder_token: learned_embeds.detach().cpu()}
+
+            save_safeloras_with_embeds(
+                loras, embeds, args.output_dir + "/lora_weight.safetensors"
+            )
 
     accelerator.end_training()
 
