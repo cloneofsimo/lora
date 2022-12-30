@@ -36,9 +36,9 @@ from lora_diffusion import (
     save_lora_weight,
     extract_lora_ups_down,
 )
-
-from torch.utils.data import Dataset
+from lora_diffusion.xformers_utils import set_use_memory_efficient_attention_xformers
 from PIL import Image
+from torch.utils.data import Dataset
 from torchvision import transforms
 
 from pathlib import Path
@@ -575,6 +575,9 @@ def parse_args(input_args=None):
         required=False,
         help="Should images be resized to --resolution before training?",
     )
+    parser.add_argument(
+        "--use_xformers", action="store_true", help="Whether or not to use xformers"
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -773,6 +776,10 @@ def main(args):
         print("Before training: text encoder First Layer lora up", _up.weight.data)
         print("Before training: text encoder First Layer lora down", _down.weight.data)
         break
+
+    if args.use_xformers:
+        set_use_memory_efficient_attention_xformers(unet, True)
+        set_use_memory_efficient_attention_xformers(vae, True)
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
