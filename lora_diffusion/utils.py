@@ -83,34 +83,43 @@ def text_img_alignment(img_embeds, text_embeds, target_img_embeds):
     }
 
 
+def prepare_clip_model_sets(eval_clip_id: str = "openai/clip-vit-large-patch14"):
+    text_model = CLIPTextModelWithProjection.from_pretrained(eval_clip_id)
+    tokenizer = CLIPTokenizer.from_pretrained(eval_clip_id)
+    vis_model = CLIPVisionModelWithProjection.from_pretrained(eval_clip_id)
+    processor = CLIPProcessor.from_pretrained(eval_clip_id)
+
+    return text_model, tokenizer, vis_model, processor
+
+
 def evaluate_pipe(
     pipe,
     target_images: List[Image.Image],
     class_token: str = "",
+    learnt_token: str = "",
     guidance_scale: float = 5.0,
     seed=0,
     clip_model_sets=None,
     eval_clip_id: str = "openai/clip-vit-large-patch14",
     n_test: int = 10,
+    n_step: int = 50,
 ):
 
     if clip_model_sets is not None:
         text_model, tokenizer, vis_model, processor = clip_model_sets
     else:
-
-        text_model = CLIPTextModelWithProjection.from_pretrained(eval_clip_id)
-        tokenizer = CLIPTokenizer.from_pretrained(eval_clip_id)
-        vis_model = CLIPVisionModelWithProjection.from_pretrained(eval_clip_id)
-        processor = CLIPProcessor.from_pretrained(eval_clip_id)
+        text_model, tokenizer, vis_model, processor = prepare_clip_model_sets(
+            eval_clip_id
+        )
 
     images = []
     img_embeds = []
     text_embeds = []
     for prompt in EXAMPLE_PROMPTS[:n_test]:
-        prompt = prompt.replace("<obj>", class_token)
+        prompt = prompt.replace("<obj>", learnt_token)
         torch.manual_seed(seed)
         img = pipe(
-            prompt, num_inference_steps=50, guidance_scale=guidance_scale
+            prompt, num_inference_steps=n_step, guidance_scale=guidance_scale
         ).images[0]
         images.append(img)
 
@@ -119,6 +128,7 @@ def evaluate_pipe(
         img_embed = vis_model(**inputs).image_embeds
         img_embeds.append(img_embed)
 
+        prompt = prompt.replace(learnt_token, class_token)
         # prompts
         inputs = tokenizer([prompt], padding=True, return_tensors="pt")
         outputs = text_model(**inputs)
