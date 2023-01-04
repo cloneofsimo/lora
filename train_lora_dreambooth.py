@@ -66,11 +66,13 @@ class DreamBoothDataset(Dataset):
         color_jitter=False,
         h_flip=False,
         resize=False,
+        filename_caption=False,
     ):
         self.size = size
         self.center_crop = center_crop
         self.tokenizer = tokenizer
         self.resize = resize
+        self.filename_caption = filename_caption
 
         self.instance_data_root = Path(instance_data_root)
         if not self.instance_data_root.exists():
@@ -138,7 +140,12 @@ class DreamBoothDataset(Dataset):
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
+
+        text = self.instance_images_path[index % self.num_instance_images].stem
+
+        print(text)
         example["instance_prompt_ids"] = self.tokenizer(
+            text,
             self.instance_prompt,
             padding="do_not_pad",
             truncation=True,
@@ -461,6 +468,13 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--use_xformers", action="store_true", help="Whether or not to use xformers"
     )
+    parser.add_argument(
+        "--filename_caption",
+        type=bool,
+        default=False,
+        required=False,
+        help=("Use filenames as instance prompts."),
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -706,6 +720,7 @@ def main(args):
         center_crop=args.center_crop,
         color_jitter=args.color_jitter,
         resize=args.resize,
+        filename_caption=args.filename_caption,
     )
 
     def collate_fn(examples):
