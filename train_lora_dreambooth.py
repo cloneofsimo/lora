@@ -140,18 +140,23 @@ class DreamBoothDataset(Dataset):
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
+        if self.filename_caption:
+            text = self.instance_images_path[index % self.num_instance_images].stem
 
-        text = self.instance_images_path[index % self.num_instance_images].stem
-
-        print(text)
-        example["instance_prompt_ids"] = self.tokenizer(
-            text,
-            self.instance_prompt,
-            padding="do_not_pad",
-            truncation=True,
-            max_length=self.tokenizer.model_max_length,
-        ).input_ids
-
+            print(text)
+            example["instance_prompt_ids"] = self.tokenizer(
+                text,
+                padding="do_not_pad",
+                truncation=True,
+                max_length=self.tokenizer.model_max_length,
+            ).input_ids
+        else:
+            example["instance_prompt_ids"] = self.tokenizer(
+                self.instance_prompt,
+                padding="do_not_pad",
+                truncation=True,
+                max_length=self.tokenizer.model_max_length,
+            ).input_ids
         if self.class_data_root:
             class_image = Image.open(
                 self.class_images_path[index % self.num_class_images]
