@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 
 import torch
 from PIL import Image
@@ -8,6 +8,12 @@ from transformers import (
     CLIPTokenizer,
     CLIPVisionModelWithProjection,
 )
+
+from diffusers import StableDiffusionPipeline
+from .lora import patch_pipe, tune_lora_scale, _text_lora_path, _ti_lora_path
+import os
+import glob
+import math
 
 EXAMPLE_PROMPTS = [
     "<obj> swimming in a pool",
@@ -45,7 +51,16 @@ EXAMPLE_PROMPTS = [
 ]
 
 
-def image_grid(_imgs, rows, cols):
+def image_grid(_imgs, rows = None, cols = None):
+    
+    if rows is None and cols is None:
+        rows = cols = math.ceil(len(_imgs) ** 0.5)
+    
+    if rows is None:
+        rows = math.ceil(len(_imgs) / cols)
+    if cols is None:
+        cols = math.ceil(len(_imgs) / rows)
+    
 
     w, h = _imgs[0].size
     grid = Image.new("RGB", size=(cols * w, rows * h))
@@ -147,3 +162,53 @@ def evaluate_pipe(
     text_embeds = torch.cat(text_embeds, dim=0)
 
     return text_img_alignment(img_embeds, text_embeds, target_img_embeds)
+
+
+def visualize_progress(
+    path_alls: Union[str, List[str]],
+    prompt: str,
+    model_id: str = "runwayml/stable-diffusion-v1-5",
+    device="cuda:0",
+    patch_unet=True,
+    patch_text=True,
+    patch_ti=True,
+    unet_scale=1.0,
+    text_sclae=1.0,
+    num_inference_steps=50,
+    guidance_scale=5.0,
+    offset : int = 0,
+    limit : int = 10,
+    seed : int = 0
+):
+
+    
+    imgs = []
+    if isinstance(path_alls, str):
+        alls = list(set(glob.glob(path_alls)))
+        
+        alls.sort(key=os.path.getmtime)
+    else:
+        alls = path_alls
+    
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id, torch_dtype=torch.float16
+    ).to(device)
+
+
+    print(f"Found {len(alls)} checkpoints")
+    for path in alls[offset:limit]:
+        print(path)
+
+        patch_pipe(
+            pipe, path, patch_unet=patch_unet, patch_text=patch_text, patch_ti=patch_ti
+        )
+
+        tune_lora_scale(pipe.unet, unet_scale)
+        tune_lora_scale(pipe.text_encoder, text_sclae)
+
+        torch.manual_seed(seed)
+        image = pipe(prompt, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale).images[0]
+        imgs.append(image)
+
+    return imgs
+    
