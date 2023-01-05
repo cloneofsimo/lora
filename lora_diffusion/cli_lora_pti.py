@@ -175,10 +175,7 @@ def loss_step(
     t_mutliplier=1.0,
     mixed_precision=False,
 ):
-    if mixed_precision:
-        weight_dtype = torch.float16
-    else:
-        weight_dtype = torch.float32
+    weight_dtype = torch.float32
 
     latents = vae.encode(
         batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
@@ -436,7 +433,6 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
-                weight_dtype,
                 t_mutliplier=0.8,
                 mixed_precision=True,
             )
