@@ -265,8 +265,10 @@ def train_inversion(
     test_image_path: str,
     accum_iter: int = 1,
     log_wandb: bool = False,
+    wandb_log_prompt_cnt: int = 10,
+    class_token: str = "person",
     mixed_precision: bool = False,
-    clip_ti_norm: bool = True,
+    clip_ti_decay: bool = True,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -312,14 +314,14 @@ def train_inversion(
                     with torch.no_grad():
 
                         # normalize embeddings
-                        if clip_ti_norm:
+                        if clip_ti_decay:
                             pre_norm = (
                                 text_encoder.get_input_embeddings()
                                 .weight[index_updates, :]
                                 .norm(dim=-1, keepdim=True)
                             )
 
-                            lambda_ = 0.1
+                            lambda_ = min(1.0, 100 * lr_scheduler.get_last_lr()[0])
                             text_encoder.get_input_embeddings().weight[
                                 index_updates
                             ] = F.normalize(
@@ -388,10 +390,10 @@ def train_inversion(
                             evaluate_pipe(
                                 pipe,
                                 target_images=images,
-                                class_token="person",
+                                class_token=class_token,
                                 learnt_token="".join(placeholder_tokens),
-                                n_test=1,
-                                n_step=30,
+                                n_test=wandb_log_prompt_cnt,
+                                n_step=50,
                                 clip_model_sets=preped_clip,
                             )
                         )
@@ -506,7 +508,7 @@ def train(
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
-    clip_ti_norm: bool = True,
+    clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-5,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,
@@ -515,13 +517,14 @@ def train(
     use_face_segmentation_condition: bool = False,
     scale_lr: bool = False,
     lr_scheduler: str = "constant",
-    lr_warmup_steps: int = 100,
+    lr_warmup_steps: int = 0,
     weight_decay_ti: float = 0.01,
     weight_decay_lora: float = 0.01,
     use_8bit_adam: bool = False,
     device="cuda:0",
     extra_args: Optional[dict] = None,
     log_wandb: bool = False,
+    wandb_log_prompt_cnt: int = 10,
     wandb_project_name: str = "new_pti_project",
     wandb_entity: str = "new_pti_entity",
 ):
@@ -544,6 +547,7 @@ def train(
     # print(placeholder_tokens, initializer_tokens)
     placeholder_tokens = placeholder_tokens.split("|")
     initializer_tokens = initializer_tokens.split("|")
+    class_token = "".join(initializer_tokens)
 
     if placeholder_token_at_data is not None:
         tok, pat = placeholder_token_at_data.split("|")
@@ -652,9 +656,11 @@ def train(
             save_path=output_dir,
             test_image_path=instance_data_dir,
             log_wandb=log_wandb,
+            wandb_log_prompt_cnt=wandb_log_prompt_cnt,
+            class_token=class_token,
             mixed_precision=False,
             tokenizer=tokenizer,
-            clip_ti_norm=clip_ti_norm,
+            clip_ti_decay=clip_ti_decay,
         )
 
         del ti_optimizer
