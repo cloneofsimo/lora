@@ -354,9 +354,16 @@ def load_safeloras(path, device="cpu"):
 
 
 def weight_apply_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, scale=1.0
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: int = 4,
+    alpha: float = 4.0,
+    nonlin: nn.Module = None,
+    #scale=1.0
 ):
-
+    scale = alpha/r
+    
     for _m, _n, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear]
     ):
@@ -365,10 +372,14 @@ def weight_apply_lora(
         up_weight = loras.pop(0).detach().to(weight.device)
         down_weight = loras.pop(0).detach().to(weight.device)
 
-        # W <- W + U * D
-        weight = weight + scale * (up_weight @ down_weight).type(weight.dtype)
+        if nonlin is None:
+            # W <- W + U * D
+            weight = weight + scale * (up_weight @ down_weight).type(weight.dtype)
+        else:
+            # W <- W + U * nonlin(D)
+            weight = weight + scale * (up_weight @ nonlin(down_weight)).type(weight.dtype)
+            
         _child_module.weight = nn.Parameter(weight)
-
 
 def monkeypatch_lora(
     model,
@@ -389,7 +400,7 @@ def monkeypatch_lora(
             _child_module.bias is not None,
             r=r,
             alpha=alpha,
-            nonline=nonlin,
+            nonlin=nonlin,
         )
         _tmp.linear.weight = weight
 
@@ -615,6 +626,8 @@ def patch_pipe(
     unet_path,
     token: str,
     r: int = 4,
+    alpha: float = 4.0,
+    nonlin: nn.Module = None,
     patch_unet=True,
     patch_text=False,
     patch_ti=False,
@@ -635,6 +648,8 @@ def patch_pipe(
             pipe.unet,
             torch.load(unet_path),
             r=r,
+            alpha=alpha,
+            nonlin=nonlin,
             target_replace_module=unet_target_replace_module,
         )
 
@@ -645,6 +660,8 @@ def patch_pipe(
             torch.load(text_path),
             target_replace_module=text_target_replace_module,
             r=r,
+            alpha=alpha,
+            nonlin=nonlin,
         )
     if patch_ti:
         print("LoRA : Patching token input")
