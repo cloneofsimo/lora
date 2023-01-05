@@ -32,7 +32,8 @@ class LoraInjectedLinear(nn.Module):
         self.scale = self.alpha / self.r
 
         if init=="kaiming":
-            nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+            pass
+            # Kaiming with a=math.sqrt(5) is default
         else:
             nn.init.normal_(self.lora_down.weight, std=1 / r)
             
