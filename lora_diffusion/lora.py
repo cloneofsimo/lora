@@ -570,12 +570,25 @@ def monkeypatch_add_lora(
         _module._modules[name].to(weight.device)
 
 
-def tune_lora_scale(model, alpha: float = 4.0):
+def tune_lora_scale(model, alpha: float = 4.0, scale: float = None):
+    if scale==None:
+        # Keep original named parameter alpha (which is really scale),
+        # Swap here so that we can correctly calculate alpha
+        scale = alpha
+        
+    for _module in model.modules():
+        if _module.__class__.__name__ == "LoraInjectedLinear":
+            _module.scale = scale
+            _module.alpha = _module.r * _module.scale
+
+            
+def tune_lora_alpha(model, alpha: float = 4.0):
     for _module in model.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
             _module.alpha = alpha
             _module.scale = _module.alpha / _module.r
-
+            
+            
 def _text_lora_path(path: str) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
     return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
