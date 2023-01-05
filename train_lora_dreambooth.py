@@ -627,6 +627,7 @@ def main(args):
             text_encoder,
             target_replace_module=["CLIPAttention"],
             r=args.lora_rank,
+            loras=args.resume_text_encoder,
         )
         for _up, _down in extract_lora_ups_down(
             text_encoder, target_replace_module=["CLIPAttention"]
