@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 
 class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4, alpha=4.0):
+    def __init__(self, in_features, out_features, bias=False, r=4, alpha=4.0, init=None, nonlin: nn.Module = None):
         super().__init__()
 
         if r > min(in_features, out_features):
@@ -20,21 +20,29 @@ class LoraInjectedLinear(nn.Module):
             
         if alpha <= 0:
             raise ValueError(
-                f"LoRA alpha {r} must be greater than 0"
+                f"LoRA alpha {alpha} must be greater than 0"
             )
             
         self.r = r
         self.alpha = alpha
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
+        self.nonlin = nonlin if nonlin is not None
         self.lora_up = nn.Linear(r, out_features, bias=False)
         self.scale = self.alpha / self.r
 
-        nn.init.normal_(self.lora_down.weight, std=1 / r)
+        if init=="kaiming":
+            nn.init.kaiming_uniform_(self.lora_down)
+        else:
+            nn.init.normal_(self.lora_down.weight, std=1 / r)
+            
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
-        return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
+        if self.nonlin is not None:
+            return self.linear(input) + self.lora_up(self.nonlin(self.lora_down(input))) * self.scale
+        else:
+            return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
 
 
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
