@@ -132,6 +132,8 @@ def inject_trainable_lora(
     target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
     r: int = 4,
     alpha: float = 4.0,
+    init=None,
+    nonlin=None,
     loras=None,  # path to lora .pt
 ):
     """
@@ -155,6 +157,8 @@ def inject_trainable_lora(
             _child_module.bias is not None,
             r=r,
             alpha=alpha,
+            init=init,
+            nonlin=nonlin,
         )
         _tmp.linear.weight = weight
         if bias is not None:
@@ -367,7 +371,12 @@ def weight_apply_lora(
 
 
 def monkeypatch_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4, alpha: float = 4.0,
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: int = 4,
+    alpha: float = 4.0,
+    nonlin: nn.Module = None,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear]
@@ -380,6 +389,7 @@ def monkeypatch_lora(
             _child_module.bias is not None,
             r=r,
             alpha=alpha,
+            nonline=nonlin,
         )
         _tmp.linear.weight = weight
 
@@ -403,7 +413,12 @@ def monkeypatch_lora(
 
 
 def monkeypatch_replace_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4, alpha: float = 4.0,
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: int = 4,
+    alpha: float = 4.0,
+    nonlin: nn.Module = None,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[LoraInjectedLinear]
@@ -416,7 +431,8 @@ def monkeypatch_replace_lora(
             _child_module.linear.bias is not None,
             r=r,
             alpha=alpha,
-        )
+            nonlin=nonlin,
+       )
         _tmp.linear.weight = weight
 
         if bias is not None:
@@ -444,6 +460,7 @@ def monkeypatch_or_replace_lora(
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: Union[int, List[int]] = 4,
     alpha: Union[float, List[float]] = 4.0,
+    nonlin: Union[float, List[nn.Module]] = None,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear, LoraInjectedLinear]
@@ -462,6 +479,7 @@ def monkeypatch_or_replace_lora(
             _source.bias is not None,
             r=r.pop(0) if isinstance(r, list) else r,
             alpha=alpha.pop(0) if isinstance(alpha, list) else alpha,
+            nonlin=nonlin.pop(0) if isinstance(nonlin, list) else nonlin,
         )
         _tmp.linear.weight = weight
 
