@@ -21,10 +21,9 @@ class LoraInjectedLinear(nn.Module):
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
         self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.scale = 32.0
+        self.scale = 1.0
 
-        #nn.init.normal_(self.lora_down.weight, std=1 / r)
-        nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        nn.init.normal_(self.lora_down.weight, std=1 / r)
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
