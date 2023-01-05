@@ -29,7 +29,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-
+import wandb
 import fire
 
 from lora_diffusion import (
@@ -39,6 +39,8 @@ from lora_diffusion import (
     inspect_lora,
     save_lora_weight,
     save_all,
+    prepare_clip_model_sets,
+    evaluate_pipe,
 )
 
 
@@ -81,11 +83,17 @@ def get_models(
 
         text_encoder.resize_token_embeddings(len(tokenizer))
         token_embeds = text_encoder.get_input_embeddings().weight.data
-        if init_tok == "<rand>":
+        if init_tok.startswith("<rand"):
+            # <rand-"sigma">, e.g. <rand-0.5>
+            sigma_val = float(re.findall(r"<rand-(.*)>", init_tok)[0])
 
-            token_embeds[placeholder_token_id] = torch.randn_like(
-                token_embeds[0]
-            ).clamp(-0.5, 0.5)
+            token_embeds[placeholder_token_id] = (
+                torch.randn_like(token_embeds[0]) * sigma_val
+            )
+            print(
+                f"Initialized {token} with random noise (sigma={sigma_val}), empirically {token_embeds[placeholder_token_id].mean().item():.3f} +- {token_embeds[placeholder_token_id].std().item():.3f}"
+            )
+
         elif init_tok == "<zero>":
             token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
         else:
@@ -158,10 +166,17 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
     return train_dataloader
 
 
-@torch.autocast("cuda")
 def loss_step(
-    batch, unet, vae, text_encoder, scheduler, weight_dtype, t_mutliplier=1.0
+    batch,
+    unet,
+    vae,
+    text_encoder,
+    scheduler,
+    t_mutliplier=1.0,
+    mixed_precision=False,
 ):
+    weight_dtype = torch.float32
+
     latents = vae.encode(
         batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
     ).latent_dist.sample()
@@ -180,9 +195,21 @@ def loss_step(
 
     noisy_latents = scheduler.add_noise(latents, noise, timesteps)
 
-    encoder_hidden_states = text_encoder(batch["input_ids"].to(text_encoder.device))[0]
+    if mixed_precision:
+        with torch.cuda.amp.autocast():
 
-    model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+            encoder_hidden_states = text_encoder(
+                batch["input_ids"].to(text_encoder.device)
+            )[0]
+
+            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+    else:
+
+        encoder_hidden_states = text_encoder(
+            batch["input_ids"].to(text_encoder.device)
+        )[0]
+
+        model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
 
     if scheduler.config.prediction_type == "epsilon":
         target = noise
@@ -207,7 +234,7 @@ def loss_step(
                 size=model_pred.shape[-2:],
                 mode="nearest",
             )
-            + 0.1
+            + 0.05
         )
 
         mask = mask / mask.mean()
@@ -225,14 +252,23 @@ def train_inversion(
     vae,
     text_encoder,
     dataloader,
-    num_steps,
+    num_steps: int,
     scheduler,
     index_no_updates,
     optimizer,
-    save_steps,
+    save_steps: int,
     placeholder_token_ids,
     placeholder_tokens,
-    save_path,
+    save_path: str,
+    tokenizer,
+    lr_scheduler,
+    test_image_path: str,
+    accum_iter: int = 1,
+    log_wandb: bool = False,
+    wandb_log_prompt_cnt: int = 10,
+    class_token: str = "person",
+    mixed_precision: bool = False,
+    clip_ti_decay: bool = True,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -242,25 +278,82 @@ def train_inversion(
     # Original Emb for TI
     orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
 
-    weight_dtype = torch.float16
+    if log_wandb:
+        preped_clip = prepare_clip_model_sets()
+
+    index_updates = ~index_no_updates
+    loss_sum = 0.0
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         unet.eval()
         text_encoder.train()
         for batch in dataloader:
 
-            loss = loss_step(batch, unet, vae, text_encoder, scheduler, weight_dtype)
-            loss.backward()
-            optimizer.step()
-            progress_bar.update(1)
-            optimizer.zero_grad()
+            lr_scheduler.step()
 
-            with torch.no_grad():
-                text_encoder.get_input_embeddings().weight[
-                    index_no_updates
-                ] = orig_embeds_params[index_no_updates]
+            with torch.set_grad_enabled(True):
+                loss = (
+                    loss_step(
+                        batch,
+                        unet,
+                        vae,
+                        text_encoder,
+                        scheduler,
+                        mixed_precision=mixed_precision,
+                    )
+                    / accum_iter
+                )
 
-            global_step += 1
+                loss.backward()
+                loss_sum += loss.detach().item()
+
+                if global_step % accum_iter == 0:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                    with torch.no_grad():
+
+                        # normalize embeddings
+                        if clip_ti_decay:
+                            pre_norm = (
+                                text_encoder.get_input_embeddings()
+                                .weight[index_updates, :]
+                                .norm(dim=-1, keepdim=True)
+                            )
+
+                            lambda_ = min(1.0, 100 * lr_scheduler.get_last_lr()[0])
+                            text_encoder.get_input_embeddings().weight[
+                                index_updates
+                            ] = F.normalize(
+                                text_encoder.get_input_embeddings().weight[
+                                    index_updates, :
+                                ],
+                                dim=-1,
+                            ) * (
+                                pre_norm + lambda_ * (0.4 - pre_norm)
+                            )
+                            print(pre_norm)
+
+                        current_norm = (
+                            text_encoder.get_input_embeddings()
+                            .weight[index_updates, :]
+                            .norm(dim=-1)
+                        )
+
+                        text_encoder.get_input_embeddings().weight[
+                            index_no_updates
+                        ] = orig_embeds_params[index_no_updates]
+
+                        print(f"Current Norm : {current_norm}")
+
+                global_step += 1
+                progress_bar.update(1)
+
+                logs = {
+                    "loss": loss.detach().item(),
+                    "lr": lr_scheduler.get_last_lr()[0],
+                }
+                progress_bar.set_postfix(**logs)
 
             if global_step % save_steps == 0:
                 save_all(
@@ -271,6 +364,39 @@ def train_inversion(
                     save_path=os.path.join(save_path, f"step_inv_{global_step}.pt"),
                     save_lora=False,
                 )
+                if log_wandb:
+                    with torch.no_grad():
+                        pipe = StableDiffusionPipeline(
+                            vae=vae,
+                            text_encoder=text_encoder,
+                            tokenizer=tokenizer,
+                            unet=unet,
+                            scheduler=scheduler,
+                            safety_checker=None,
+                            feature_extractor=None,
+                        )
+
+                        # open all images in test_image_path
+                        images = []
+                        for file in os.listdir(test_image_path):
+                            if file.endswith(".png") or file.endswith(".jpg"):
+                                images.append(
+                                    Image.open(os.path.join(test_image_path, file))
+                                )
+
+                        wandb.log({"loss": loss_sum / save_steps})
+                        loss_sum = 0.0
+                        wandb.log(
+                            evaluate_pipe(
+                                pipe,
+                                target_images=images,
+                                class_token=class_token,
+                                learnt_token="".join(placeholder_tokens),
+                                n_test=wandb_log_prompt_cnt,
+                                n_step=50,
+                                clip_model_sets=preped_clip,
+                            )
+                        )
 
             if global_step >= num_steps:
                 return
@@ -309,8 +435,8 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
-                weight_dtype,
                 t_mutliplier=0.8,
+                mixed_precision=True,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -382,6 +508,7 @@ def train(
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
+    clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-5,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,
@@ -390,19 +517,37 @@ def train(
     use_face_segmentation_condition: bool = False,
     scale_lr: bool = False,
     lr_scheduler: str = "constant",
-    lr_warmup_steps: int = 100,
+    lr_warmup_steps: int = 0,
     weight_decay_ti: float = 0.01,
     weight_decay_lora: float = 0.01,
     use_8bit_adam: bool = False,
     device="cuda:0",
+    extra_args: Optional[dict] = None,
+    log_wandb: bool = False,
+    wandb_log_prompt_cnt: int = 10,
+    wandb_project_name: str = "new_pti_project",
+    wandb_entity: str = "new_pti_entity",
 ):
     torch.manual_seed(seed)
+
+    if log_wandb:
+        wandb.init(
+            project=wandb_project_name,
+            entity=wandb_entity,
+            name=f"steps_{max_train_steps_ti}_lr_{learning_rate_ti}_{instance_data_dir.split('/')[-1]}",
+            reinit=True,
+            config={
+                "lr": learning_rate_ti,
+                **(extra_args if extra_args is not None else {}),
+            },
+        )
 
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
     # print(placeholder_tokens, initializer_tokens)
     placeholder_tokens = placeholder_tokens.split("|")
     initializer_tokens = initializer_tokens.split("|")
+    class_token = "".join(initializer_tokens)
 
     if placeholder_token_at_data is not None:
         tok, pat = placeholder_token_at_data.split("|")
@@ -455,6 +600,8 @@ def train(
         use_face_segmentation_condition=use_face_segmentation_condition,
     )
 
+    train_dataset.blur_amount = 200
+
     train_dataloader = text2img_dataloader(
         train_dataset, train_batch_size, tokenizer, vae, text_encoder
     )
@@ -480,7 +627,16 @@ def train(
         ti_optimizer = optim.AdamW(
             text_encoder.get_input_embeddings().parameters(),
             lr=ti_lr,
+            betas=(0.9, 0.999),
+            eps=1e-08,
             weight_decay=weight_decay_ti,
+        )
+
+        lr_scheduler = get_scheduler(
+            lr_scheduler,
+            optimizer=ti_optimizer,
+            num_warmup_steps=lr_warmup_steps,
+            num_training_steps=max_train_steps_ti,
         )
 
         train_inversion(
@@ -489,13 +645,22 @@ def train(
             text_encoder,
             train_dataloader,
             max_train_steps_ti,
+            accum_iter=gradient_accumulation_steps,
             scheduler=noise_scheduler,
             index_no_updates=index_no_updates,
             optimizer=ti_optimizer,
+            lr_scheduler=lr_scheduler,
             save_steps=save_steps,
             placeholder_tokens=placeholder_tokens,
             placeholder_token_ids=placeholder_token_ids,
             save_path=output_dir,
+            test_image_path=instance_data_dir,
+            log_wandb=log_wandb,
+            wandb_log_prompt_cnt=wandb_log_prompt_cnt,
+            class_token=class_token,
+            mixed_precision=False,
+            tokenizer=tokenizer,
+            clip_ti_decay=clip_ti_decay,
         )
 
         del ti_optimizer
@@ -551,6 +716,8 @@ def train(
     unet.train()
     if train_text_encoder:
         text_encoder.train()
+
+    train_dataset.blur_amount = 70
 
     perform_tuning(
         unet,

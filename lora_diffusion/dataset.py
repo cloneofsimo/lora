@@ -1,12 +1,12 @@
-from torch.utils.data import Dataset
-
-from typing import List, Tuple, Dict, Union, Optional
-from PIL import Image, ImageFilter
-from torchvision import transforms
-from pathlib import Path
-import cv2
 import random
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
+
+import cv2
 import numpy as np
+from PIL import Image, ImageFilter
+from torch.utils.data import Dataset
+from torchvision import transforms
 
 OBJECT_TEMPLATE = [
     "a photo of a {}",
