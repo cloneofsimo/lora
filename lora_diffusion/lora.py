@@ -10,18 +10,25 @@ import torch.nn.functional as F
 
 
 class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4):
+    def __init__(self, in_features, out_features, bias=False, r=4, alpha=4.0):
         super().__init__()
 
         if r > min(in_features, out_features):
             raise ValueError(
                 f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
             )
-
+            
+        if alpha <= 0:
+            raise ValueError(
+                f"LoRA alpha {r} must be greater than 0"
+            )
+            
+        self.r = r
+        self.alpha = alpha
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
         self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.scale = 1.0
+        self.scale = self.alpha / self.r
 
         nn.init.normal_(self.lora_down.weight, std=1 / r)
         nn.init.zeros_(self.lora_up.weight)
@@ -116,6 +123,7 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
     r: int = 4,
+    alpha: float = 4.0,
     loras=None,  # path to lora .pt
 ):
     """
@@ -137,7 +145,8 @@ def inject_trainable_lora(
             _child_module.in_features,
             _child_module.out_features,
             _child_module.bias is not None,
-            r,
+            r=r,
+            alpha=alpha,
         )
         _tmp.linear.weight = weight
         if bias is not None:
@@ -333,7 +342,7 @@ def load_safeloras(path, device="cpu"):
 
 
 def weight_apply_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, alpha=1.0
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, scale=1.0
 ):
 
     for _m, _n, _child_module in _find_modules(
@@ -345,12 +354,12 @@ def weight_apply_lora(
         down_weight = loras.pop(0).detach().to(weight.device)
 
         # W <- W + U * D
-        weight = weight + alpha * (up_weight @ down_weight).type(weight.dtype)
+        weight = weight + scale * (up_weight @ down_weight).type(weight.dtype)
         _child_module.weight = nn.Parameter(weight)
 
 
 def monkeypatch_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4, alpha: float = 4.0,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear]
@@ -362,6 +371,7 @@ def monkeypatch_lora(
             _child_module.out_features,
             _child_module.bias is not None,
             r=r,
+            alpha=alpha,
         )
         _tmp.linear.weight = weight
 
@@ -385,7 +395,7 @@ def monkeypatch_lora(
 
 
 def monkeypatch_replace_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4, alpha: float = 4.0,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[LoraInjectedLinear]
@@ -397,6 +407,7 @@ def monkeypatch_replace_lora(
             _child_module.linear.out_features,
             _child_module.linear.bias is not None,
             r=r,
+            alpha=alpha,
         )
         _tmp.linear.weight = weight
 
@@ -424,6 +435,7 @@ def monkeypatch_or_replace_lora(
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: Union[int, List[int]] = 4,
+    alpha: Union[float, List[float]] = 4.0,
 ):
     for _module, name, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear, LoraInjectedLinear]
@@ -441,6 +453,7 @@ def monkeypatch_or_replace_lora(
             _source.out_features,
             _source.bias is not None,
             r=r.pop(0) if isinstance(r, list) else r,
+            alpha=alpha.pop(0) if isinstance(alpha, list) else alpha,
         )
         _tmp.linear.weight = weight
 
@@ -519,11 +532,11 @@ def monkeypatch_add_lora(
         _module._modules[name].to(weight.device)
 
 
-def tune_lora_scale(model, alpha: float = 1.0):
+def tune_lora_scale(model, alpha: float = 4.0):
     for _module in model.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
-            _module.scale = alpha
-
+            _module.alpha = alpha
+            _module.scale = _module.alpha / _module.r
 
 def _text_lora_path(path: str) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
