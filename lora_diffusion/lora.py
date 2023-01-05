@@ -27,7 +27,7 @@ class LoraInjectedLinear(nn.Module):
         self.alpha = alpha
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
-        self.nonlin = nonlin if nonlin is not None
+        self.nonlin = nonlin if nonlin else None
         self.lora_up = nn.Linear(r, out_features, bias=False)
         self.scale = self.alpha / self.r
 
@@ -39,7 +39,7 @@ class LoraInjectedLinear(nn.Module):
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
-        if self.nonlin is not None:
+        if self.nonlin:
             return self.linear(input) + self.lora_up(self.nonlin(self.lora_down(input))) * self.scale
         else:
             return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
