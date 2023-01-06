@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 
 class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4, alpha=4.0, init=None, nonlin: nn.Module = None):
+    def __init__(self, in_features, out_features, bias=False, r=4, scale=1.0, init=None, nonlin: nn.Module = None):
         super().__init__()
 
         if r > min(in_features, out_features):
@@ -18,22 +18,21 @@ class LoraInjectedLinear(nn.Module):
                 f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
             )
             
-        if alpha <= 0:
+        if scale <= 0:
             raise ValueError(
-                f"LoRA alpha {alpha} must be greater than 0"
+                f"LoRA scale {scale} must be greater than 0"
             )
             
         self.r = r
-        self.alpha = alpha
+        self.scale = scale
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
         self.nonlin = nonlin if nonlin else None
         self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.scale = self.alpha / self.r
 
         if init=="kaiming":
             pass
-            # Kaiming with a=math.sqrt(5) is default
+            # Kaiming with a=math.sqrt(5) is default for nn.Linear
         else:
             nn.init.normal_(self.lora_down.weight, std=1 / r)
             
@@ -132,7 +131,7 @@ def inject_trainable_lora(
     model: nn.Module,
     target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
     r: int = 4,
-    alpha: float = 4.0,
+    scale: float = 1.0,
     init=None,
     nonlin=None,
     loras=None,  # path to lora .pt
@@ -157,7 +156,7 @@ def inject_trainable_lora(
             _child_module.out_features,
             _child_module.bias is not None,
             r=r,
-            alpha=alpha,
+            scale=scale,
             init=init,
             nonlin=nonlin,
         )
@@ -359,12 +358,9 @@ def weight_apply_lora(
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: int = 4,
-    alpha: float = 4.0,
+    scale: float = 1.0,
     nonlin: nn.Module = None,
-    #scale=1.0
-):
-    scale = alpha/r
-    
+):    
     for _m, _n, _child_module in _find_modules(
         model, target_replace_module, search_class=[nn.Linear]
     ):
@@ -387,7 +383,7 @@ def monkeypatch_lora(
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: int = 4,
-    alpha: float = 4.0,
+    scale: float = 1.0,
     nonlin: nn.Module = None,
 ):
     for _module, name, _child_module in _find_modules(
@@ -400,7 +396,7 @@ def monkeypatch_lora(
             _child_module.out_features,
             _child_module.bias is not None,
             r=r,
-            alpha=alpha,
+            scale=scale,
             nonlin=nonlin,
         )
         _tmp.linear.weight = weight
@@ -429,7 +425,7 @@ def monkeypatch_replace_lora(
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: int = 4,
-    alpha: float = 4.0,
+    scale: float = 1.0,
     nonlin: nn.Module = None,
 ):
     for _module, name, _child_module in _find_modules(
@@ -442,7 +438,7 @@ def monkeypatch_replace_lora(
             _child_module.linear.out_features,
             _child_module.linear.bias is not None,
             r=r,
-            alpha=alpha,
+            scale=scale,
             nonlin=nonlin,
        )
         _tmp.linear.weight = weight
@@ -471,7 +467,7 @@ def monkeypatch_or_replace_lora(
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
     r: Union[int, List[int]] = 4,
-    alpha: Union[float, List[float]] = 4.0,
+    scale: Union[float, List[float]] = 1.0,
     nonlin: Union[float, List[nn.Module]] = None,
 ):
     for _module, name, _child_module in _find_modules(
@@ -490,7 +486,7 @@ def monkeypatch_or_replace_lora(
             _source.out_features,
             _source.bias is not None,
             r=r.pop(0) if isinstance(r, list) else r,
-            alpha=alpha.pop(0) if isinstance(alpha, list) else alpha,
+            scale=scale.pop(0) if isinstance(scale, list) else scale,
             nonlin=nonlin.pop(0) if isinstance(nonlin, list) else nonlin,
         )
         _tmp.linear.weight = weight
@@ -547,7 +543,7 @@ def monkeypatch_add_lora(
     model,
     loras,
     target_replace_module=DEFAULT_TARGET_REPLACE,
-    alpha: float = 1.0,
+    scale: float = 1.0,
     beta: float = 1.0,
 ):
     for _module, name, _child_module in _find_modules(
@@ -570,24 +566,15 @@ def monkeypatch_add_lora(
         _module._modules[name].to(weight.device)
 
 
-def tune_lora_scale(model, alpha: float = 4.0, scale: float = None):
-    if scale==None:
+def tune_lora_scale(model, alpha: float = 1.0, scale: float = None):
+    if alpha:
         # Keep original named parameter alpha (which is really scale),
-        # Swap here so that we can correctly calculate alpha
         scale = alpha
         
     for _module in model.modules():
         if _module.__class__.__name__ == "LoraInjectedLinear":
             _module.scale = scale
-            _module.alpha = _module.r * _module.scale
 
-            
-def tune_lora_alpha(model, alpha: float = 4.0):
-    for _module in model.modules():
-        if _module.__class__.__name__ == "LoraInjectedLinear":
-            _module.alpha = alpha
-            _module.scale = _module.alpha / _module.r
-            
             
 def _text_lora_path(path: str) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
@@ -640,7 +627,7 @@ def patch_pipe(
     unet_path,
     token: str,
     r: int = 4,
-    alpha: float = 4.0,
+    scale: float = 1.0,
     nonlin: nn.Module = None,
     patch_unet=True,
     patch_text=False,
@@ -662,7 +649,7 @@ def patch_pipe(
             pipe.unet,
             torch.load(unet_path),
             r=r,
-            alpha=alpha,
+            scale=scale,
             nonlin=nonlin,
             target_replace_module=unet_target_replace_module,
         )
@@ -674,7 +661,7 @@ def patch_pipe(
             torch.load(text_path),
             target_replace_module=text_target_replace_module,
             r=r,
-            alpha=alpha,
+            scale=scale,
             nonlin=nonlin,
         )
     if patch_ti:
