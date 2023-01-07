@@ -4,3 +4,4 @@ scipy
 ftfy
 fire
 wandb
+safetensors
