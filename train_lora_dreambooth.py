@@ -90,42 +90,20 @@ class DreamBoothDataset(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
+         
+        img_transforms = []
+
 
         if resize:
-            self.image_transforms = transforms.Compose(
-                [
-                    transforms.Resize(
-                        size, interpolation=transforms.InterpolationMode.BILINEAR
-                    ),
-                    transforms.CenterCrop(size)
-                    if center_crop
-                    else transforms.Lambda(lambda x: x),
-                    transforms.ColorJitter(0.2, 0.1)
-                    if color_jitter
-                    else transforms.Lambda(lambda x: x),
-                    transforms.RandomHorizontalFlip()
-                    if h_flip
-                    else transforms.Lambda(lambda x: x),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5], [0.5]),
-                ]
-            )
-        else:
-            self.image_transforms = transforms.Compose(
-                [
-                    transforms.CenterCrop(size)
-                    if center_crop
-                    else transforms.Lambda(lambda x: x),
-                    transforms.ColorJitter(0.2, 0.1)
-                    if color_jitter
-                    else transforms.Lambda(lambda x: x),
-                    transforms.RandomHorizontalFlip()
-                    if h_flip
-                    else transforms.Lambda(lambda x: x),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5], [0.5]),
-                ]
-            )
+            img_transforms.append(transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR))
+        if center_crop:
+            img_transforms.append(transforms.CenterCrop(size))
+        if color_jitter:
+            img_transforms.append(transforms.ColorJitter(0.2, 0.1))
+        if h_flip:
+            img_transforms.append(transforms.RandomHorizontalFlip())
+
+        self.image_transforms = transforms.Compose([*img_transforms, transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
 
     def __len__(self):
         return self._length
