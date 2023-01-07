@@ -4,3 +4,5 @@ __pycache__
 *.pyc
 __test*
 merged_lora*
+wandb
+exps

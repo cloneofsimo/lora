@@ -33,12 +33,13 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from lora_diffusion import (
     extract_lora_ups_down,
     inject_trainable_lora,
+    safetensors_available,
     save_lora_weight,
     save_safeloras,
 )
-
-from torch.utils.data import Dataset
+from lora_diffusion.xformers_utils import set_use_memory_efficient_attention_xformers
 from PIL import Image
+from torch.utils.data import Dataset
 from torchvision import transforms
 
 from pathlib import Path
@@ -89,8 +90,9 @@ class DreamBoothDataset(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
-            
+         
         img_transforms = []
+
 
         if resize:
             img_transforms.append(transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR))
@@ -239,6 +241,13 @@ def parse_args(input_args=None):
         type=str,
         default="text-inversion-model",
         help="The output directory where the model predictions and checkpoints will be written.",
+    )
+    parser.add_argument(
+        "--output_format",
+        type=str,
+        choices=["pt", "safe", "both"],
+        default="both",
+        help="The output format of the model predicitions and checkpoints.",
     )
     parser.add_argument(
         "--seed", type=int, default=None, help="A seed for reproducible training."
@@ -425,7 +434,10 @@ def parse_args(input_args=None):
         type=bool,
         default=True,
         required=False,
-        help="Should images be resized to --resolution before training?"
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--use_xformers", action="store_true", help="Whether or not to use xformers"
     )
 
     if input_args is not None:
@@ -450,6 +462,17 @@ def parse_args(input_args=None):
         if args.class_prompt is not None:
             logger.warning(
                 "You need not use --class_prompt without --with_prior_preservation."
+            )
+
+    if not safetensors_available:
+        if args.output_format == "both":
+            print(
+                "Safetensors is not available - changing output format to just output PyTorch files"
+            )
+            args.output_format = "pt"
+        elif args.output_format == "safe":
+            raise ValueError(
+                "Safetensors is not available - either install it, or change output_format."
             )
 
     return args
@@ -592,6 +615,10 @@ def main(args):
             )
             break
 
+    if args.use_xformers:
+        set_use_memory_efficient_attention_xformers(unet, True)
+        set_use_memory_efficient_attention_xformers(vae, True)
+
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
         if args.train_text_encoder:
@@ -657,7 +684,6 @@ def main(args):
         center_crop=args.center_crop,
         color_jitter=args.color_jitter,
         resize=args.resize,
-
     )
 
     def collate_fn(examples):
@@ -945,26 +971,29 @@ def main(args):
 
         print("\n\nLora TRAINING DONE!\n\n")
 
-        save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
-        if args.train_text_encoder:
-            save_lora_weight(
-                pipeline.text_encoder,
-                args.output_dir + "/lora_weight.text_encoder.pt",
-                target_replace_module=["CLIPAttention"],
-            )
+        if args.output_format == "pt" or args.output_format == "both":
+            save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
+            if args.train_text_encoder:
+                save_lora_weight(
+                    pipeline.text_encoder,
+                    args.output_dir + "/lora_weight.text_encoder.pt",
+                    target_replace_module=["CLIPAttention"],
+                )
+
+        if args.output_format == "safe" or args.output_format == "both":
+            loras = {}
+            loras["unet"] = (pipeline.unet, {"CrossAttention", "Attention", "GEGLU"})
+            if args.train_text_encoder:
+                loras["text_encoder"] = (pipeline.text_encoder, {"CLIPAttention"})
+
+            save_safeloras(loras, args.output_dir + "/lora_weight.safetensors")
 
         if args.push_to_hub:
             repo.push_to_hub(
-                commit_message="End of training", blocking=False, auto_lfs_prune=True
+                commit_message="End of training",
+                blocking=False,
+                auto_lfs_prune=True,
             )
-
-        save_safeloras(
-            {
-                "unet": (pipeline.unet, {"CrossAttention", "Attention", "GEGLU"}),
-                "text_encoder": (pipeline.text_encoder, {"CLIPAttention"}),
-            },
-            args.output_dir + "/lora_weight.safetensors",
-        )
 
     accelerator.end_training()
 

@@ -14,6 +14,7 @@ setup(
         "console_scripts": [
             "lora_add = lora_diffusion.cli_lora_add:main",
             "lora_pti = lora_diffusion.cli_lora_pti:main",
+            "lora_distill = lora_diffusion.cli_svd:main",
         ],
     },
     install_requires=[
