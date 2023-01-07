@@ -75,13 +75,13 @@ def add(
             path_1,
         ).to("cpu")
 
-        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
+        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), scale=alpha)
         if with_text_lora:
 
             weight_apply_lora(
                 loaded_pipeline.text_encoder,
                 torch.load(_text_lora_path(path_2)),
-                alpha=alpha,
+                scale=alpha,
                 target_replace_module=["CLIPAttention"],
             )
 
@@ -93,12 +93,12 @@ def add(
             path_1,
         ).to("cpu")
 
-        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
+        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), scale=alpha)
         if with_text_lora:
             weight_apply_lora(
                 loaded_pipeline.text_encoder,
                 torch.load(_text_lora_path(path_2)),
-                alpha=alpha,
+                scale=alpha,
                 target_replace_module=["CLIPAttention"],
             )
 
