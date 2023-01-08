@@ -1,3 +1,4 @@
+import json
 import math
 from itertools import groupby
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
@@ -7,6 +8,25 @@ import PIL
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+try:
+    from safetensors.torch import safe_open
+    from safetensors.torch import save_file as safe_save
+
+    safetensors_available = True
+except ImportError:
+    from .safe_open import safe_open
+
+    def safe_save(
+        tensors: Dict[str, torch.Tensor],
+        filename: str,
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> None:
+        raise EnvironmentError(
+            "Saving safetensors requires the safetensors library. Please install with pip or similar."
+        )
+
+    safetensors_available = False
 
 
 class LoraInjectedLinear(nn.Module):
@@ -34,6 +54,8 @@ UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
 TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
 
 DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
+
+EMBED_FLAG = "<embed>"
 
 
 def _find_children(
@@ -185,8 +207,8 @@ def save_lora_weight(
     for _up, _down in extract_lora_ups_down(
         model, target_replace_module=target_replace_module
     ):
-        weights.append(_up.weight)
-        weights.append(_down.weight)
+        weights.append(_up.weight.to("cpu").to(torch.float16))
+        weights.append(_down.weight.to("cpu").to(torch.float16))
 
     torch.save(weights, path)
 
@@ -203,8 +225,9 @@ def save_lora_as_json(model, path="./lora.json"):
         json.dump(weights, f)
 
 
-def save_safeloras(
+def save_safeloras_with_embeds(
     modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
+    embeds: Dict[str, torch.Tensor] = {},
     outpath="./lora.safetensors",
 ):
     """
@@ -217,10 +240,6 @@ def save_safeloras(
     weights = {}
     metadata = {}
 
-    import json
-
-    from safetensors.torch import save_file
-
     for name, (model, target_replace_module) in modelmap.items():
         metadata[name] = json.dumps(list(target_replace_module))
 
@@ -231,12 +250,24 @@ def save_safeloras(
             weights[f"{name}:{i}:up"] = _up.weight
             weights[f"{name}:{i}:down"] = _down.weight
 
-    print(f"Saving weights to {outpath} with metadata", metadata)
-    save_file(weights, outpath, metadata)
+    for token, tensor in embeds.items():
+        metadata[token] = EMBED_FLAG
+        weights[token] = tensor
+
+    print(f"Saving weights to {outpath}")
+    safe_save(weights, outpath, metadata)
 
 
-def convert_loras_to_safeloras(
+def save_safeloras(
+    modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
+    outpath="./lora.safetensors",
+):
+    return save_safeloras_with_embeds(modelmap=modelmap, outpath=outpath)
+
+
+def convert_loras_to_safeloras_with_embeds(
     modelmap: Dict[str, Tuple[str, Set[str], int]] = {},
+    embeds: Dict[str, torch.Tensor] = {},
     outpath="./lora.safetensors",
 ):
     """
@@ -249,10 +280,6 @@ def convert_loras_to_safeloras(
 
     weights = {}
     metadata = {}
-
-    import json
-
-    from safetensors.torch import save_file
 
     for name, (path, target_replace_module, r) in modelmap.items():
         metadata[name] = json.dumps(list(target_replace_module))
@@ -268,8 +295,19 @@ def convert_loras_to_safeloras(
             else:
                 weights[f"{name}:{i}:down"] = weight
 
-    print(f"Saving weights to {outpath} with metadata", metadata)
-    save_file(weights, outpath, metadata)
+    for token, tensor in embeds.items():
+        metadata[token] = EMBED_FLAG
+        weights[token] = tensor
+
+    print(f"Saving weights to {outpath}")
+    safe_save(weights, outpath, metadata)
+
+
+def convert_loras_to_safeloras(
+    modelmap: Dict[str, Tuple[str, Set[str], int]] = {},
+    outpath="./lora.safetensors",
+):
+    convert_loras_to_safeloras_with_embeds(modelmap=modelmap, outpath=outpath)
 
 
 def parse_safeloras(
@@ -288,9 +326,6 @@ def parse_safeloras(
     }
     """
     loras = {}
-
-    import json
-
     metadata = safeloras.metadata()
 
     get_name = lambda k: k.split(":")[0]
@@ -299,12 +334,24 @@ def parse_safeloras(
     keys.sort(key=get_name)
 
     for name, module_keys in groupby(keys, get_name):
+        info = metadata.get(name)
+
+        if not info:
+            raise ValueError(
+                f"Tensor {name} has no metadata - is this a Lora safetensor?"
+            )
+
+        # Skip Textual Inversion embeds
+        if info == EMBED_FLAG:
+            continue
+
+        # Handle Loras
         # Extract the targets
-        target = json.loads(metadata[name])
+        target = json.loads(info)
 
         # Build the result lists - Python needs us to preallocate lists to insert into them
         module_keys = list(module_keys)
-        ranks = [None] * (len(module_keys) // 2)
+        ranks = [4] * (len(module_keys) // 2)
         weights = [None] * len(module_keys)
 
         for key in module_keys:
@@ -313,7 +360,7 @@ def parse_safeloras(
             idx = int(idx)
 
             # Add the rank
-            ranks[idx] = json.loads(metadata[f"{name}:{idx}:rank"])
+            ranks[idx] = int(metadata[f"{name}:{idx}:rank"])
 
             # Insert the weight into the list
             idx = idx * 2 + (1 if direction == "down" else 0)
@@ -324,12 +371,40 @@ def parse_safeloras(
     return loras
 
 
+def parse_safeloras_embeds(
+    safeloras,
+) -> Dict[str, torch.Tensor]:
+    """
+    Converts a loaded safetensor file that contains Textual Inversion embeds into
+    a dictionary of embed_token: Tensor
+    """
+    embeds = {}
+    metadata = safeloras.metadata()
+
+    for key in safeloras.keys():
+        # Only handle Textual Inversion embeds
+        meta = metadata.get(key)
+        if not meta or meta != EMBED_FLAG:
+            continue
+
+        embeds[key] = safeloras.get_tensor(key)
+
+    return embeds
+
+
 def load_safeloras(path, device="cpu"):
-
-    from safetensors.torch import safe_open
-
     safeloras = safe_open(path, framework="pt", device=device)
     return parse_safeloras(safeloras)
+
+
+def load_safeloras_embeds(path, device="cpu"):
+    safeloras = safe_open(path, framework="pt", device=device)
+    return parse_safeloras_embeds(safeloras)
+
+
+def load_safeloras_both(path, device="cpu"):
+    safeloras = safe_open(path, framework="pt", device=device)
+    return parse_safeloras(safeloras), parse_safeloras_embeds(safeloras)
 
 
 def weight_apply_lora(
@@ -535,46 +610,69 @@ def _ti_lora_path(path: str) -> str:
     return ".".join(path.split(".")[:-1] + ["ti", "pt"])
 
 
-def load_learned_embed_in_clip(
-    learned_embeds_path, text_encoder, tokenizer, token=None, idempotent=False
+def apply_learned_embed_in_clip(
+    learned_embeds,
+    text_encoder,
+    tokenizer,
+    token: Optional[Union[str, List[str]]] = None,
+    idempotent=False,
 ):
-    loaded_learned_embeds = torch.load(learned_embeds_path, map_location="cpu")
+    if isinstance(token, str):
+        trained_tokens = [token]
+    elif isinstance(token, list):
+        assert len(learned_embeds.keys()) == len(
+            token
+        ), "The number of tokens and the number of embeds should be the same"
+        trained_tokens = token
+    else:
+        trained_tokens = list(learned_embeds.keys())
 
-    # separate token and the embeds
-    trained_token = list(loaded_learned_embeds.keys())[0]
-    embeds = loaded_learned_embeds[trained_token]
+    for token in trained_tokens:
+        print(token)
+        embeds = learned_embeds[token]
 
-    # cast to dtype of text_encoder
-    dtype = text_encoder.get_input_embeddings().weight.dtype
+        # cast to dtype of text_encoder
+        dtype = text_encoder.get_input_embeddings().weight.dtype
+        num_added_tokens = tokenizer.add_tokens(token)
 
-    # add the token in tokenizer
-    token = token if token is not None else trained_token
-    num_added_tokens = tokenizer.add_tokens(token)
-    i = 1
-    if not idempotent:
-        while num_added_tokens == 0:
+        i = 1
+        if not idempotent:
+            while num_added_tokens == 0:
+                print(f"The tokenizer already contains the token {token}.")
+                token = f"{token[:-1]}-{i}>"
+                print(f"Attempting to add the token {token}.")
+                num_added_tokens = tokenizer.add_tokens(token)
+                i += 1
+        elif num_added_tokens == 0 and idempotent:
             print(f"The tokenizer already contains the token {token}.")
-            token = f"{token[:-1]}-{i}>"
-            print(f"Attempting to add the token {token}.")
-            num_added_tokens = tokenizer.add_tokens(token)
-            i += 1
-    elif num_added_tokens == 0 and idempotent:
-        print(f"The tokenizer already contains the token {token}.")
-        print(f"Replacing {token} embedding.")
+            print(f"Replacing {token} embedding.")
 
-    # resize the token embeddings
-    text_encoder.resize_token_embeddings(len(tokenizer))
+        # resize the token embeddings
+        text_encoder.resize_token_embeddings(len(tokenizer))
 
-    # get the id for the token and assign the embeds
-    token_id = tokenizer.convert_tokens_to_ids(token)
-    text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+        # get the id for the token and assign the embeds
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        text_encoder.get_input_embeddings().weight.data[token_id] = embeds
     return token
+
+
+def load_learned_embed_in_clip(
+    learned_embeds_path,
+    text_encoder,
+    tokenizer,
+    token: Optional[Union[str, List[str]]] = None,
+    idempotent=False,
+):
+    learned_embeds = torch.load(learned_embeds_path)
+    apply_learned_embed_in_clip(
+        learned_embeds, text_encoder, tokenizer, token, idempotent
+    )
 
 
 def patch_pipe(
     pipe,
-    unet_path,
-    token: str,
+    maybe_unet_path,
+    token: Optional[str] = None,
     r: int = 4,
     patch_unet=True,
     patch_text=False,
@@ -583,37 +681,53 @@ def patch_pipe(
     unet_target_replace_module=DEFAULT_TARGET_REPLACE,
     text_target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
 ):
-    assert (
-        len(token) > 0
-    ), "Token cannot be empty. Input token non-empty token like <s>."
+    if maybe_unet_path.endswith(".pt"):
+        # torch format
 
-    ti_path = _ti_lora_path(unet_path)
-    text_path = _text_lora_path(unet_path)
+        if maybe_unet_path.endswith(".ti.pt"):
+            unet_path = unet_path[:-6] + ".pt"
+        elif maybe_unet_path.endswith(".text_encoder.pt"):
+            unet_path = unet_path[:-16] + ".pt"
 
-    if patch_unet:
-        print("LoRA : Patching Unet")
-        monkeypatch_or_replace_lora(
-            pipe.unet,
-            torch.load(unet_path),
-            r=r,
-            target_replace_module=unet_target_replace_module,
-        )
+        ti_path = _ti_lora_path(unet_path)
+        text_path = _text_lora_path(unet_path)
 
-    if patch_text:
-        print("LoRA : Patching text encoder")
-        monkeypatch_or_replace_lora(
-            pipe.text_encoder,
-            torch.load(text_path),
-            target_replace_module=text_target_replace_module,
-            r=r,
-        )
-    if patch_ti:
-        print("LoRA : Patching token input")
-        token = load_learned_embed_in_clip(
-            ti_path,
+        if patch_unet:
+            print("LoRA : Patching Unet")
+            monkeypatch_or_replace_lora(
+                pipe.unet,
+                torch.load(unet_path),
+                r=r,
+                target_replace_module=unet_target_replace_module,
+            )
+
+        if patch_text:
+            print("LoRA : Patching text encoder")
+            monkeypatch_or_replace_lora(
+                pipe.text_encoder,
+                torch.load(text_path),
+                target_replace_module=text_target_replace_module,
+                r=r,
+            )
+        if patch_ti:
+            print("LoRA : Patching token input")
+            token = load_learned_embed_in_clip(
+                ti_path,
+                pipe.text_encoder,
+                pipe.tokenizer,
+                token=token,
+                idempotent=idempotent_token,
+            )
+
+    elif maybe_unet_path.endswith(".safetensors"):
+        safeloras = safe_open(maybe_unet_path, framework="pt", device="cpu")
+        monkeypatch_or_replace_safeloras(pipe, safeloras)
+        tok_dict = parse_safeloras_embeds(safeloras)
+        apply_learned_embed_in_clip(
+            tok_dict,
             pipe.text_encoder,
             pipe.tokenizer,
-            token,
+            token=token,
             idempotent=idempotent_token,
         )
 
@@ -641,34 +755,67 @@ def inspect_lora(model):
 def save_all(
     unet,
     text_encoder,
-    placeholder_token_id,
-    placeholder_token,
+    placeholder_token_ids,
+    placeholder_tokens,
     save_path,
     save_lora=True,
+    save_ti=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
     target_replace_module_unet=DEFAULT_TARGET_REPLACE,
+    safe_form=True,
 ):
+    if not safe_form:
+        # save ti
+        if save_ti:
+            ti_path = _ti_lora_path(save_path)
+            learned_embeds_dict = {}
+            for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+                learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+                print(
+                    f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                    learned_embeds[:4],
+                )
+                learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
-    # save ti
-    ti_path = _ti_lora_path(save_path)
-    learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_id]
-    print("Current Learned Embeddings: ", learned_embeds[:4])
+            torch.save(learned_embeds_dict, ti_path)
+            print("Ti saved to ", ti_path)
 
-    learned_embeds_dict = {placeholder_token: learned_embeds.detach().cpu()}
-    torch.save(learned_embeds_dict, ti_path)
-    print("Ti saved to ", ti_path)
+        # save text encoder
+        if save_lora:
 
-    # save text encoder
-    if save_lora:
+            save_lora_weight(
+                unet, save_path, target_replace_module=target_replace_module_unet
+            )
+            print("Unet saved to ", save_path)
 
-        save_lora_weight(
-            unet, save_path, target_replace_module=target_replace_module_unet
-        )
-        print("Unet saved to ", save_path)
+            save_lora_weight(
+                text_encoder,
+                _text_lora_path(save_path),
+                target_replace_module=target_replace_module_text,
+            )
+            print("Text Encoder saved to ", _text_lora_path(save_path))
 
-        save_lora_weight(
-            text_encoder,
-            _text_lora_path(save_path),
-            target_replace_module=target_replace_module_text,
-        )
-        print("Text Encoder saved to ", _text_lora_path(save_path))
+    else:
+        assert save_path.endswith(
+            ".safetensors"
+        ), f"Save path : {save_path} should end with .safetensors"
+
+        loras = {}
+        embeds = None
+
+        if save_lora:
+
+            loras["unet"] = (unet, target_replace_module_unet)
+            loras["text_encoder"] = (text_encoder, target_replace_module_text)
+
+        if save_ti:
+            embeds = {}
+            for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+                learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+                print(
+                    f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                    learned_embeds[:4],
+                )
+                embeds[tok] = learned_embeds.detach().cpu()
+
+        save_safeloras_with_embeds(loras, embeds, save_path)
