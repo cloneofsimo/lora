@@ -10,11 +10,11 @@
 
 <!-- #region -->
 <p align="center">
-<img  src="contents/lora_with_clip.jpg">
+<img  src="contents/lora_pti_example.jpg">
 </p>
 <!-- #endregion -->
 
-> "game character bnha, wearing a red shirt, riding a donkey", with Overwatch-fine-tuned LoRA model, for both CLIP and Unet.
+> SD 1.5 PTI on Kiriko, the game character, Various Prompts.
 
 <!-- #region -->
 <p align="center">
@@ -22,7 +22,7 @@
 </p>
 <!-- #endregion -->
 
-> "style of sks, baby lion", with disney-style LoRA model.
+> `"baby lion in style of <s1><s2>"`, with disney-style LoRA model.
 
 <!-- #region -->
 <p align="center">
@@ -30,16 +30,17 @@
 </p>
 <!-- #endregion -->
 
-> "style of sks, superman", with pop-art style LoRA model.
+> `"superman, style of <s1><s2>"`, with pop-art style LoRA model.
 
 ## Main Features
 
 - Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
-- Get insanely small end result (3MB for just unet, 4MB for both unet + clip + token embedding), easy to share and download.
-- Easy to use, compatible with `diffusers`
+- Get insanely small end result (1MB ~ 6MB), easy to share and download.
+- Compatible with `diffusers`
 - Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints + Build recipes by merging LoRAs together
 - Pipeline to fine-tune CLIP + Unet + token to gain better results.
+- Out-of-the box multi-vector pivotal tuning inversion
 
 # Web Demo
 
@@ -48,6 +49,15 @@
 - Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
+
+### 2022/01/09
+
+- Pivotal Tuning Inversion with extended latent
+- Better textual inversion with Norm prior
+- Mask conditioned score estimation loss
+- safetensor support, xformers support (thanks to @[hafriedlander](https://github.com/hafriedlander))
+- Distill fully trained model to LoRA with SVD distillation CLI
+- Flexiable dataset support
 
 ### 2022/12/22
 
@@ -105,7 +115,49 @@ pip install git+https://github.com/cloneofsimo/lora.git
 
 # Getting Started
 
-## Fine-tuning Stable diffusion with LoRA.
+## 1. Fine-tuning Stable diffusion with LoRA CLI
+
+If you have over 12 GB of memory, it is recommended to use Pivotal Tuning Inversion CLI provided with lora implementation. They have the best performance, and will be updated many times in the future as well. These are the parameters that worked for various dataset. _ALL OF THE EXAMPLE ABOVE WERE TRAINED WITH BELOW PARAMETERS_
+
+```bash
+export MODEL_NAME="runwayml/stable-diffusion-v1-5"
+export INSTANCE_DIR="./data/data_disney"
+export OUTPUT_DIR="./exps/output_dsn"
+
+lora_pti \
+  --pretrained_model_name_or_path=$MODEL_NAME  \
+  --instance_data_dir=$INSTANCE_DIR \
+  --output_dir=$OUTPUT_DIR \
+  --train_text_encoder \
+  --resolution=512 \
+  --train_batch_size=1 \
+  --gradient_accumulation_steps=4 \
+  --scale_lr \
+  --learning_rate_unet=1e-4 \
+  --learning_rate_text=1e-5 \
+  --learning_rate_ti=5e-4 \
+  --color_jitter \
+  --lr_scheduler="linear" \
+  --lr_warmup_steps=0 \
+  --placeholder_tokens="<s1>|<s2>" \
+  --use_template="style"\
+  --save_steps=100 \
+  --max_train_steps_ti=1000 \
+  --max_train_steps_tuning=1000 \
+  --perform_inversion=True \
+  --clip_ti_decay \
+  --weight_decay_ti=0.000 \
+  --weight_decay_lora=0.001\
+  --continue_inversion \
+  --continue_inversion_lr=1e-4 \
+  --device="cuda:0" \
+  --lora_rank=1 \
+#  --use_face_segmentation_condition\
+```
+
+[Check here to see what these parameters mean](https://github.com/cloneofsimo/lora/discussions/121).
+
+## 2. Other Options
 
 Basic usage is as follows: prepare sets of $A, B$ matrices in an unet model, and fine-tune them.
 
@@ -126,16 +178,16 @@ optimizer = optim.Adam(
 )
 ```
 
-A working example of this, applied on [Dreambooth](https://arxiv.org/abs/2208.12242) can be found in `train_lora_dreambooth.py`. Run this example with
+Another example of this, applied on [Dreambooth](https://arxiv.org/abs/2208.12242) can be found in `training_scripts/train_lora_dreambooth.py`. Run this example with
 
 ```bash
-run_lora_db.sh
+training_scripts/run_lora_db.sh
 ```
 
 Another dreambooth example, with text_encoder training on can be run with:
 
 ```bash
-run_lora_db_w_text.sh
+training_scripts/run_lora_db_w_text.sh
 ```
 
 ## Loading, merging, and interpolating trained LORAs with CLIs.
@@ -336,12 +388,10 @@ Here is an extensive visualization on the effect of $\alpha_{unet}$, $\alpha_{te
 TODOS
 
 - Make this more user friendly for non-programmers
-- Make a better CLI
 - Make a better documentation
 - Kronecker product, like LoRA [https://arxiv.org/abs/2106.04647]
 - Adaptor-guidance
 - Time-aware fine-tuning.
-- Test alpha scheduling. I think it will be meaningful.
 
 # References
 
