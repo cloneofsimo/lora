@@ -93,6 +93,7 @@ def get_models(
             print(
                 f"Initialized {token} with random noise (sigma={sigma_val}), empirically {token_embeds[placeholder_token_id].mean().item():.3f} +- {token_embeds[placeholder_token_id].std().item():.3f}"
             )
+            print(f"Norm : {token_embeds[placeholder_token_id].norm():.4f}")
 
         elif init_tok == "<zero>":
             token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
@@ -493,7 +494,7 @@ def train(
     use_template: Literal[None, "object", "style"] = None,
     placeholder_tokens: str = "<s>",
     placeholder_token_at_data: Optional[str] = None,
-    initializer_tokens: str = "dog",
+    initializer_tokens: Optional[str] = None,
     class_prompt: Optional[str] = None,
     with_prior_preservation: bool = False,
     prior_loss_weight: float = 1.0,
@@ -550,7 +551,16 @@ def train(
         os.makedirs(output_dir, exist_ok=True)
     # print(placeholder_tokens, initializer_tokens)
     placeholder_tokens = placeholder_tokens.split("|")
-    initializer_tokens = initializer_tokens.split("|")
+    if initializer_tokens is None:
+        print("PTI : Initializer Token not give, random inits")
+        initializer_tokens = ["<rand-0.036>"] * len(placeholder_tokens)
+    else:
+        initializer_tokens = initializer_tokens.split("|")
+
+    assert len(initializer_tokens) == len(
+        placeholder_tokens
+    ), "Unequal Initializer token for Placeholder tokens."
+
     class_token = "".join(initializer_tokens)
 
     if placeholder_token_at_data is not None:
@@ -558,7 +568,8 @@ def train(
         token_map = {tok: pat}
 
     else:
-        token_map = None
+        token_map = {"DUMMY": "".join(placeholder_tokens)}
+
     print("Placeholder Tokens", placeholder_tokens)
     print("Initializer Tokens", initializer_tokens)
 
