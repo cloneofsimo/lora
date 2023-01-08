@@ -361,7 +361,9 @@ def train_inversion(
                     text_encoder=text_encoder,
                     placeholder_token_ids=placeholder_token_ids,
                     placeholder_tokens=placeholder_tokens,
-                    save_path=os.path.join(save_path, f"step_inv_{global_step}.pt"),
+                    save_path=os.path.join(
+                        save_path, f"step_inv_{global_step}.safetensors"
+                    ),
                     save_lora=False,
                 )
                 if log_wandb:
@@ -453,7 +455,9 @@ def perform_tuning(
                     text_encoder,
                     placeholder_token_ids=placeholder_token_ids,
                     placeholder_tokens=placeholder_tokens,
-                    save_path=os.path.join(save_path, f"step_{global_step}.pt"),
+                    save_path=os.path.join(
+                        save_path, f"step_{global_step}.safetensors"
+                    ),
                 )
                 moved = (
                     torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))

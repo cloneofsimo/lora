@@ -720,7 +720,16 @@ def patch_pipe(
             )
 
     elif maybe_unet_path.endswith(".safetensors"):
-        pass
+        safeloras = safe_open(maybe_unet_path, framework="pt", device="cpu")
+        monkeypatch_or_replace_safeloras(pipe, safeloras)
+        tok_dict = parse_safeloras_embeds(safeloras)
+        apply_learned_embed_in_clip(
+            tok_dict,
+            pipe.text_encoder,
+            pipe.tokenizer,
+            token=token,
+            idempotent=idempotent_token,
+        )
 
 
 @torch.no_grad()
@@ -792,21 +801,21 @@ def save_all(
         ), f"Save path : {save_path} should end with .safetensors"
 
         loras = {}
+        embeds = None
 
         if save_lora:
 
             loras["unet"] = (unet, target_replace_module_unet)
             loras["text_encoder"] = (text_encoder, target_replace_module_text)
 
-        embeds = {}
-        for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
-            learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
-            print(
-                f"Current Learned Embeddings for {tok}:, id {tok_id} ",
-                learned_embeds[:4],
-            )
-            embeds[tok] = learned_embeds.detach().cpu()
+        if save_ti:
+            embeds = {}
+            for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+                learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+                print(
+                    f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                    learned_embeds[:4],
+                )
+                embeds[tok] = learned_embeds.detach().cpu()
 
-        save_safeloras_with_embeds(
-            loras, embeds, save_path + "/lora_weight.safetensors"
-        )
+        save_safeloras_with_embeds(loras, embeds, save_path)
