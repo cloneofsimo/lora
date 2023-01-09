@@ -417,6 +417,7 @@ def perform_tuning(
     placeholder_token_ids,
     placeholder_tokens,
     save_path,
+    lr_scheduler_lora,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -430,6 +431,8 @@ def perform_tuning(
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         for batch in dataloader:
+            lr_scheduler_lora.step()
+
             optimizer.zero_grad()
 
             loss = loss_step(
@@ -447,6 +450,11 @@ def perform_tuning(
             )
             optimizer.step()
             progress_bar.update(1)
+            logs = {
+                "loss": loss.detach().item(),
+                "lr": lr_scheduler_lora.get_last_lr()[0],
+            }
+            progress_bar.set_postfix(**logs)
 
             global_step += 1
 
@@ -504,27 +512,29 @@ def train(
     color_jitter: bool = True,
     train_batch_size: int = 1,
     sample_batch_size: int = 1,
-    max_train_steps_tuning: int = 10000,
-    max_train_steps_ti: int = 2000,
-    save_steps: int = 500,
-    gradient_accumulation_steps: int = 1,
+    max_train_steps_tuning: int = 1000,
+    max_train_steps_ti: int = 1000,
+    save_steps: int = 100,
+    gradient_accumulation_steps: int = 4,
     gradient_checkpointing: bool = False,
     mixed_precision="fp16",
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
     clip_ti_decay: bool = True,
-    learning_rate_unet: float = 1e-5,
+    learning_rate_unet: float = 1e-4,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,
     continue_inversion: bool = True,
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
     scale_lr: bool = False,
-    lr_scheduler: str = "constant",
+    lr_scheduler: str = "linear",
     lr_warmup_steps: int = 0,
-    weight_decay_ti: float = 0.01,
-    weight_decay_lora: float = 0.01,
+    lr_scheduler_lora: str = "linear",
+    lr_warmup_steps_lora: int = 0,
+    weight_decay_ti: float = 0.00,
+    weight_decay_lora: float = 0.001,
     use_8bit_adam: bool = False,
     device="cuda:0",
     extra_args: Optional[dict] = None,
@@ -553,7 +563,7 @@ def train(
     placeholder_tokens = placeholder_tokens.split("|")
     if initializer_tokens is None:
         print("PTI : Initializer Token not give, random inits")
-        initializer_tokens = ["<rand-0.036>"] * len(placeholder_tokens)
+        initializer_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     else:
         initializer_tokens = initializer_tokens.split("|")
 
@@ -588,8 +598,7 @@ def train(
     )
 
     if gradient_checkpointing:
-        text_encoder.gradient_checkpointing_enable()
-        unet.gradient_checkpointing_enable()
+        unet.enable_gradient_checkpointing()
 
     if scale_lr:
         unet_lr = learning_rate_unet * gradient_accumulation_steps * train_batch_size
@@ -734,6 +743,13 @@ def train(
 
     train_dataset.blur_amount = 70
 
+    lr_scheduler_lora = get_scheduler(
+        lr_scheduler_lora,
+        optimizer=lora_optimizers,
+        num_warmup_steps=lr_warmup_steps_lora,
+        num_training_steps=max_train_steps_tuning,
+    )
+
     perform_tuning(
         unet,
         vae,
@@ -746,6 +762,7 @@ def train(
         placeholder_tokens=placeholder_tokens,
         placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
+        lr_scheduler_lora=lr_scheduler_lora,
     )
 
 

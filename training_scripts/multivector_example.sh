@@ -10,6 +10,7 @@ lora_pti \
   --resolution=512 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=4 \
+  --gradient_checkpointing \
   --scale_lr \
   --learning_rate_unet=1e-4 \
   --learning_rate_text=1e-5 \
@@ -17,6 +18,8 @@ lora_pti \
   --color_jitter \
   --lr_scheduler="linear" \
   --lr_warmup_steps=0 \
+  --lr_scheduler_lora="linear" \
+  --lr_warmup_steps_lora=100 \
   --placeholder_tokens="<s1>|<s2>" \
   --use_template="style"\
   --save_steps=100 \
