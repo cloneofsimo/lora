@@ -51,16 +51,15 @@ EXAMPLE_PROMPTS = [
 ]
 
 
-def image_grid(_imgs, rows = None, cols = None):
-    
+def image_grid(_imgs, rows=None, cols=None):
+
     if rows is None and cols is None:
         rows = cols = math.ceil(len(_imgs) ** 0.5)
-    
+
     if rows is None:
         rows = math.ceil(len(_imgs) / cols)
     if cols is None:
         cols = math.ceil(len(_imgs) / rows)
-    
 
     w, h = _imgs[0].size
     grid = Image.new("RGB", size=(cols * w, rows * h))
@@ -176,24 +175,22 @@ def visualize_progress(
     text_sclae=1.0,
     num_inference_steps=50,
     guidance_scale=5.0,
-    offset : int = 0,
-    limit : int = 10,
-    seed : int = 0
+    offset: int = 0,
+    limit: int = 10,
+    seed: int = 0,
 ):
 
-    
     imgs = []
     if isinstance(path_alls, str):
         alls = list(set(glob.glob(path_alls)))
-        
+
         alls.sort(key=os.path.getmtime)
     else:
         alls = path_alls
-    
+
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id, torch_dtype=torch.float16
     ).to(device)
-
 
     print(f"Found {len(alls)} checkpoints")
     for path in alls[offset:limit]:
@@ -207,8 +204,11 @@ def visualize_progress(
         tune_lora_scale(pipe.text_encoder, text_sclae)
 
         torch.manual_seed(seed)
-        image = pipe(prompt, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale).images[0]
+        image = pipe(
+            prompt,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+        ).images[0]
         imgs.append(image)
 
     return imgs
-    

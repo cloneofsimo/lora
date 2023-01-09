@@ -90,12 +90,15 @@ class DreamBoothDataset(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
-         
+
         img_transforms = []
 
-
         if resize:
-            img_transforms.append(transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR))
+            img_transforms.append(
+                transforms.Resize(
+                    size, interpolation=transforms.InterpolationMode.BILINEAR
+                )
+            )
         if center_crop:
             img_transforms.append(transforms.CenterCrop(size))
         if color_jitter:
@@ -103,7 +106,9 @@ class DreamBoothDataset(Dataset):
         if h_flip:
             img_transforms.append(transforms.RandomHorizontalFlip())
 
-        self.image_transforms = transforms.Compose([*img_transforms, transforms.ToTensor(), transforms.Normalize([0.5], [0.5])])
+        self.image_transforms = transforms.Compose(
+            [*img_transforms, transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+        )
 
     def __len__(self):
         return self._length
