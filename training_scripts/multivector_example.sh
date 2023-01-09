@@ -17,6 +17,8 @@ lora_pti \
   --color_jitter \
   --lr_scheduler="linear" \
   --lr_warmup_steps=0 \
+  --lr_scheduler_lora="linear" \
+  --lr_warmup_steps_lora=100 \
   --placeholder_tokens="<s1>|<s2>" \
   --use_template="style"\
   --save_steps=100 \
