@@ -598,8 +598,7 @@ def train(
     )
 
     if gradient_checkpointing:
-        text_encoder.gradient_checkpointing_enable()
-        unet.gradient_checkpointing_enable()
+        unet.enable_gradient_checkpointing()
 
     if scale_lr:
         unet_lr = learning_rate_unet * gradient_accumulation_steps * train_batch_size

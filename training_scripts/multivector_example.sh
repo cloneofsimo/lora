@@ -10,6 +10,7 @@ lora_pti \
   --resolution=512 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=4 \
+  --gradient_checkpointing \
   --scale_lr \
   --learning_rate_unet=1e-4 \
   --learning_rate_text=1e-5 \
