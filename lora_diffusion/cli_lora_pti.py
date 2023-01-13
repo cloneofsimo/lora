@@ -36,11 +36,13 @@ from lora_diffusion import (
     PivotalTuningDatasetCapation,
     extract_lora_ups_down,
     inject_trainable_lora,
+    inject_trainable_lora_extended,
     inspect_lora,
     save_lora_weight,
     save_all,
     prepare_clip_model_sets,
     evaluate_pipe,
+    UNET_EXTENDED_TARGET_REPLACE,
 )
 
 
@@ -418,6 +420,8 @@ def perform_tuning(
     placeholder_tokens,
     save_path,
     lr_scheduler_lora,
+    lora_unet_target_modules,
+    lora_clip_target_modules,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -467,6 +471,8 @@ def perform_tuning(
                     save_path=os.path.join(
                         save_path, f"step_{global_step}.safetensors"
                     ),
+                    target_replace_module_text=lora_clip_target_modules,
+                    target_replace_module_unet=lora_unet_target_modules,
                 )
                 moved = (
                     torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
@@ -521,6 +527,7 @@ def train(
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
+    use_extended_lora: bool = False,
     clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-4,
     learning_rate_text: float = 1e-5,
@@ -690,9 +697,21 @@ def train(
         del ti_optimizer
 
     # Next perform Tuning with LoRA:
-    unet_lora_params, _ = inject_trainable_lora(
-        unet, r=lora_rank, target_replace_module=lora_unet_target_modules
-    )
+    if not use_extended_lora:
+        unet_lora_params, _ = inject_trainable_lora(
+            unet, r=lora_rank, target_replace_module=lora_unet_target_modules
+        )
+    else:
+        print("USING EXTENDED UNET!!!")
+        lora_unet_target_modules = (
+            lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
+        )
+        print("Will replace modules: ", lora_unet_target_modules)
+
+        unet_lora_params, _ = inject_trainable_lora_extended(
+            unet, r=lora_rank, target_replace_module=lora_unet_target_modules
+        )
+    print(f"PTI : has {len(unet_lora_params)} lora")
 
     print("Before training:")
     inspect_lora(unet)
@@ -763,6 +782,8 @@ def train(
         placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
         lr_scheduler_lora=lr_scheduler_lora,
+        lora_unet_target_modules=lora_unet_target_modules,
+        lora_clip_target_modules=lora_clip_target_modules,
     )
 
 
