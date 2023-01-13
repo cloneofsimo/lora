@@ -5,5 +5,5 @@ __pycache__
 __test*
 merged_lora*
 wandb
-exps
+exps*
 .vscode
