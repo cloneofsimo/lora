@@ -65,9 +65,8 @@ class LoraInjectedConv2d(nn.Module):
         dilation=1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
         r: int = 4,
-        dropout_p : float = 0.1
+        dropout_p: float = 0.1,
     ):
         super().__init__()
         if r > min(in_channels, out_channels):
@@ -151,7 +150,10 @@ def _find_modules_v2(
     model,
     ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
     search_class: List[Type[nn.Module]] = [nn.Linear],
-    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [
+        LoraInjectedLinear,
+        LoraInjectedConv2d,
+    ],
 ):
     """
     Find all modules of a certain class (or union of classes) that are direct or
@@ -630,9 +632,8 @@ def monkeypatch_or_replace_lora_extended(
         search_class=[nn.Linear, LoraInjectedLinear, nn.Conv2d, LoraInjectedConv2d],
     ):
 
-        if (
-            _child_module.__class__ == nn.Linear
-            or _child_module.__class__ == LoraInjectedLinear
+        if (_child_module.__class__ == nn.Linear) or (
+            _child_module.__class__ == LoraInjectedLinear
         ):
             if len(loras[0].shape) != 2:
                 continue
@@ -656,7 +657,9 @@ def monkeypatch_or_replace_lora_extended(
             if bias is not None:
                 _tmp.linear.bias = bias
 
-        elif _child_module.__class__ == nn.Conv2d:
+        elif (_child_module.__class__ == nn.Conv2d) or (
+            _child_module.__class__ == LoraInjectedConv2d
+        ):
             if len(loras[0].shape) != 4:
                 continue
             _source = (
@@ -665,17 +668,17 @@ def monkeypatch_or_replace_lora_extended(
                 else _child_module
             )
 
-            weight = _child_module.weight
-            bias = _child_module.bias
+            weight = _source.weight
+            bias = _source.bias
             _tmp = LoraInjectedConv2d(
-                _child_module.in_channels,
-                _child_module.out_channels,
-                _child_module.kernel_size,
-                _child_module.stride,
-                _child_module.padding,
-                _child_module.dilation,
-                _child_module.groups,
-                _child_module.bias is not None,
+                _source.in_channels,
+                _source.out_channels,
+                _source.kernel_size,
+                _source.stride,
+                _source.padding,
+                _source.dilation,
+                _source.groups,
+                _source.bias is not None,
                 r=r.pop(0) if isinstance(r, list) else r,
             )
 

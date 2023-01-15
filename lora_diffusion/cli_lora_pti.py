@@ -532,7 +532,7 @@ def train(
     learning_rate_unet: float = 1e-4,
     learning_rate_text: float = 1e-5,
     learning_rate_ti: float = 5e-4,
-    continue_inversion: bool = True,
+    continue_inversion: bool = False,
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
     scale_lr: bool = False,
@@ -739,7 +739,8 @@ def train(
         )
         for param in params_to_freeze:
             param.requires_grad = False
-
+    else:
+        text_encoder.requires_grad_(False)
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder,
