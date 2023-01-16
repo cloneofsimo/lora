@@ -240,7 +240,7 @@ def loss_step(
             + 0.05
         )
 
-        mask = mask / mask.mean()
+        mask = mask / mask.max()
 
         model_pred = model_pred * mask
 

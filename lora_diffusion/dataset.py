@@ -241,8 +241,12 @@ class PivotalTuningDatasetCapation(Dataset):
         print(text)
 
         if self.use_mask:
-            example["mask"] = self.image_transforms(
-                Image.open(self.mask_path[index % self.num_instance_images])
+            example["mask"] = (
+                self.image_transforms(
+                    Image.open(self.mask_path[index % self.num_instance_images])
+                )
+                * 0.5
+                + 1
             )
 
         if self.h_flip and random.random() > 0.5:
