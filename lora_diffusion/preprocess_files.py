@@ -68,6 +68,7 @@ def clipseg_mask_generator(
     ] = "CIDAS/clipseg-rd64-refined",
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     bias: float = 0.01,
+    temp: float = 1.0,
     **kwargs,
 ) -> List[Image.Image]:
     """
@@ -100,7 +101,7 @@ def clipseg_mask_generator(
         outputs = model(**inputs)
 
         logits = outputs.logits
-        probs = torch.nn.functional.softmax(logits, dim=0)[0]
+        probs = torch.nn.functional.softmax(logits / temp, dim=0)[0]
         probs = (probs + bias).clamp_(0, 1)
         probs = 255 * probs / probs.max()
 
@@ -166,7 +167,7 @@ def face_mask_google_mediapipe(
         image = np.array(image)
 
         results = face_detection.process(image)
-        black_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
+        black_image = np.ones((image.shape[0], image.shape[1]), dtype=np.uint8)
 
         if results.detections:
 
@@ -187,16 +188,9 @@ def face_mask_google_mediapipe(
                 )
 
                 # draw the colored rectangle
-                black_image[y_min : y_min + height, x_min : x_min + width] = 1.0
+                black_image[y_min : y_min + height, x_min : x_min + width] = 255
 
-            # blur the image
-
-        black_image = black_image + bias
-        black_image = black_image / black_image.max()
-
-        black_image = Image.fromarray(
-            (black_image * 255).astype(np.uint8), mode="L"
-        ).filter(ImageFilter.GaussianBlur(radius=blur_amount))
+        black_image = Image.fromarray(black_image)
         masks.append(black_image)
 
     return masks
@@ -249,6 +243,8 @@ def load_and_save_masks_and_captions(
     target_prompts: Optional[Union[List[str], str]] = None,
     target_size: int = 512,
     crop_based_on_salience: bool = True,
+    use_face_detection_instead: bool = False,
+    temp: float = 1.0,
 ):
     """
     Loads images from the given files, generates masks for them, and saves the masks and captions and upscale images
@@ -282,7 +278,12 @@ def load_and_save_masks_and_captions(
         target_prompts = captions
 
     print(f"Generating {len(images)} masks...")
-    seg_masks = clipseg_mask_generator(images=images, target_prompts=target_prompts)
+    if not use_face_detection_instead:
+        seg_masks = clipseg_mask_generator(
+            images=images, target_prompts=target_prompts, temp=temp
+        )
+    else:
+        seg_masks = face_mask_google_mediapipe(images=images)
 
     # find the center of mass of the mask
     if crop_based_on_salience:
