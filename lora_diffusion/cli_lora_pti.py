@@ -535,6 +535,7 @@ def train(
     continue_inversion: bool = False,
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
+    use_mask_captioned_data: bool = False,
     scale_lr: bool = False,
     lr_scheduler: str = "linear",
     lr_warmup_steps: int = 0,
@@ -629,6 +630,7 @@ def train(
         size=resolution,
         color_jitter=color_jitter,
         use_face_segmentation_condition=use_face_segmentation_condition,
+        use_mask_captioned_data=use_mask_captioned_data,
     )
 
     train_dataset.blur_amount = 200

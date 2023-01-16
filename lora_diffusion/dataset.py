@@ -111,11 +111,15 @@ class PivotalTuningDatasetCapation(Dataset):
         self.instance_images_path = []
         self.mask_path = []
 
+        assert not (
+            use_mask_captioned_data and use_template
+        ), "Can't use both mask caption data and template."
+
         # Prepare the instance images
         if use_mask_captioned_data:
-            ends_with_sredjpg = glob.glob(str(instance_data_root) + "/*src.jpg")
-            for f in ends_with_sredjpg:
-                idx = int(ends_with_sredjpg.split(".")[-2])
+            src_imgs = glob.glob(str(instance_data_root) + "/*src.jpg")
+            for f in src_imgs:
+                idx = int(str(Path(f).stem).split(".")[0])
                 mask_path = f"{instance_data_root}/{idx}.mask.png"
 
                 if Path(mask_path).exists():
@@ -123,6 +127,8 @@ class PivotalTuningDatasetCapation(Dataset):
                     self.mask_path.append(mask_path)
                 else:
                     print(f"Mask not found for {f}")
+
+            self.captions = open(f"{instance_data_root}/caption.txt").readlines()
 
         else:
             self.instance_images_path = list(instance_data_root.iterdir())
@@ -204,7 +210,8 @@ class PivotalTuningDatasetCapation(Dataset):
 
             text = random.choice(self.templates).format(input_tok)
         else:
-            text = self.instance_images_path[index % self.num_instance_images].stem
+            text = self.captions[index % self.num_instance_images].strip()
+
             if self.token_map is not None:
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)

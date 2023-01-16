@@ -122,7 +122,7 @@ def blip_captioning_dataset(
     model_id: Literal[
         "Salesforce/blip-image-captioning-large",
         "Salesforce/blip-image-captioning-base",
-    ] = "Salesforce/blip-image-captioning-base",
+    ] = "Salesforce/blip-image-captioning-large",
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     **kwargs,
 ) -> List[str]:
@@ -138,8 +138,7 @@ def blip_captioning_dataset(
 
     for image in images:
         inputs = processor(image, return_tensors="pt").to("cuda")
-
-        out = model.generate(**inputs)
+        out = model.generate(**inputs, max_length=150)
         caption = processor.decode(out[0], skip_special_tokens=True)
 
         captions.append(caption)
@@ -307,11 +306,13 @@ def load_and_save_masks_and_captions(
         _crop_to_square(mask, com, resize_to=target_size)
         for mask, com in zip(seg_masks, coms)
     ]
+    with open(os.path.join(output_dir, "caption.txt"), "w") as f:
+        # save images and masks
+        for idx, (image, mask, caption) in enumerate(zip(images, seg_masks, captions)):
+            image.save(os.path.join(output_dir, f"{idx}.src.jpg"), quality=99)
+            mask.save(os.path.join(output_dir, f"{idx}.mask.png"))
 
-    # save images and masks
-    for idx, (image, mask, caption) in enumerate(zip(images, seg_masks, captions)):
-        image.save(os.path.join(output_dir, f"{caption}.{idx}.src.jpg"), quality=99)
-        mask.save(os.path.join(output_dir, f"{idx}.mask.png"))
+            f.write(caption + "\n")
 
 
 def main():
