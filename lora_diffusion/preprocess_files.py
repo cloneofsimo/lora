@@ -4,7 +4,7 @@
 
 from typing import List, Literal, Union
 import os
-from PIL import Image
+from PIL import Image, ImageFilter
 import torch
 import numpy as np
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
@@ -18,7 +18,10 @@ def swin_ir_sr(
     ] = "caidas/swin2SR-classical-sr-x2-64",
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     **kwargs,
-) -> None:
+) -> List[Image.Image]:
+    """
+    Upscales images using SwinIR. Returns a list of PIL images.
+    """
     # So this is currently in main branch, so this can be used in the future I guess?
     from transformers import Swin2SRForImageSuperResolution, Swin2SRImageProcessor
 
@@ -57,7 +60,10 @@ def clipseg_mask_generator(
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     bias: float = 0.05,
     **kwargs,
-):
+) -> List[Image.Image]:
+    """
+    Returns a greyscale mask for each image, where the mask is the probability of the target prompt being present in the image
+    """
 
     if isinstance(target_prompts, str):
         print(
@@ -109,7 +115,10 @@ def blip_captioning_dataset(
     ] = "Salesforce/blip-image-captioning-base",
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     **kwargs,
-):
+) -> List[str]:
+    """
+    Returns a list of captions for the given images
+    """
 
     from transformers import BlipProcessor, BlipForConditionalGeneration
 
@@ -126,3 +135,61 @@ def blip_captioning_dataset(
         captions.append(caption)
 
     return captions
+
+
+def face_mask_google_mediapipe(
+    images: List[Image.Image], blur_amount: float = 80.0, bias: float = 0.05
+) -> List[Image.Image]:
+    """
+    Returns a list of images with mask on the face parts.
+    """
+    import cv2
+
+    import mediapipe as mp
+
+    mp_face_detection = mp.solutions.face_detection
+
+    face_detection = mp_face_detection.FaceDetection(
+        model_selection=1, min_detection_confidence=0.5
+    )
+
+    masks = []
+    for image in images:
+
+        image = np.array(image)
+
+        results = face_detection.process(image)
+        black_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.float32)
+
+        if results.detections:
+
+            for detection in results.detections:
+
+                x_min = int(
+                    detection.location_data.relative_bounding_box.xmin * image.shape[1]
+                )
+                y_min = int(
+                    detection.location_data.relative_bounding_box.ymin * image.shape[0]
+                )
+                width = int(
+                    detection.location_data.relative_bounding_box.width * image.shape[1]
+                )
+                height = int(
+                    detection.location_data.relative_bounding_box.height
+                    * image.shape[0]
+                )
+
+                # draw the colored rectangle
+                black_image[y_min : y_min + height, x_min : x_min + width] = 1.0
+
+            # blur the image
+
+        black_image = black_image + bias
+        black_image = black_image / black_image.max()
+
+        black_image = Image.fromarray(
+            (black_image * 255).astype(np.uint8), mode="L"
+        ).filter(ImageFilter.GaussianBlur(radius=blur_amount))
+        masks.append(black_image)
+
+    return masks
