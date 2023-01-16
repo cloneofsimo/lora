@@ -300,7 +300,7 @@ def load_and_save_masks_and_captions(
     # save images and masks
     for idx, (image, mask, caption) in enumerate(zip(images, seg_masks, captions)):
         image.save(os.path.join(output_dir, f"{caption}.{idx}.sred.jpg"))
-        mask.save(os.path.join(output_dir, f"{caption}.{idx}.mask.png"))
+        mask.save(os.path.join(output_dir, f"{idx}.mask.png"))
 
 
 def main():

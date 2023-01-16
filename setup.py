@@ -15,6 +15,7 @@ setup(
             "lora_add = lora_diffusion.cli_lora_add:main",
             "lora_pti = lora_diffusion.cli_lora_pti:main",
             "lora_distill = lora_diffusion.cli_svd:main",
+            "lora_ppim = lora_diffusion.preprocess_files:main",
         ],
     },
     install_requires=[
