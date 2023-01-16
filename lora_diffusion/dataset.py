@@ -131,7 +131,16 @@ class PivotalTuningDatasetCapation(Dataset):
             self.captions = open(f"{instance_data_root}/caption.txt").readlines()
 
         else:
-            self.instance_images_path = list(instance_data_root.iterdir())
+            possibily_src_images = glob.glob(
+                str(instance_data_root) + "/*.jpg"
+            ) + glob.glob(str(instance_data_root) + "/*.png")
+            possibily_src_images = (
+                set(possibily_src_images)
+                - set(glob.glob(str(instance_data_root) + "/*mask.png"))
+                - set([str(instance_data_root) + "/caption.txt"])
+            )
+
+            self.instance_images_path = list(set(possibily_src_images))
 
         assert (
             len(self.instance_images_path) > 0
@@ -142,18 +151,31 @@ class PivotalTuningDatasetCapation(Dataset):
         self.use_mask = use_face_segmentation_condition or use_mask_captioned_data
 
         if use_face_segmentation_condition:
-            print(
-                "Warning : this will pre-process all the images in the instance data root."
-            )
 
-            if len(self.mask_path) > 0:
-                print("Warning : masks already exists, but will be overwritten.")
+            for idx in range(len(self.instance_images_path)):
+                targ = f"{instance_data_root}/{idx}.mask.png"
+                # see if the mask exists
+                if not Path(targ).exists():
+                    print(f"Mask not found for {targ}")
 
-            masks = face_mask_google_mediapipe(
-                [Image.open(f) for f in self.instance_images_path]
-            )
-            for idx, mask in enumerate(masks):
-                mask.save(f"{instance_data_root}/{idx}.mask.png")
+                    print(
+                        "Warning : this will pre-process all the images in the instance data root."
+                    )
+
+                    if len(self.mask_path) > 0:
+                        print(
+                            "Warning : masks already exists, but will be overwritten."
+                        )
+
+                    masks = face_mask_google_mediapipe(
+                        [Image.open(f) for f in self.instance_images_path]
+                    )
+                    for idx, mask in enumerate(masks):
+                        mask.save(f"{instance_data_root}/{idx}.mask.png")
+
+                    break
+
+            for idx in range(len(self.instance_images_path)):
                 self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
 
         self.num_instance_images = len(self.instance_images_path)
