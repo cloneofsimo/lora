@@ -18,6 +18,7 @@ def swin_ir_sr(
     model_id: Literal[
         "caidas/swin2SR-classical-sr-x2-64", "caidas/swin2SR-classical-sr-x4-48"
     ] = "caidas/swin2SR-classical-sr-x2-64",
+    target_size: Optional[Tuple[int, int]] = None,
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
     **kwargs,
 ) -> List[Image.Image]:
@@ -35,6 +36,12 @@ def swin_ir_sr(
     out_images = []
 
     for image in images:
+
+        ori_w, ori_h = image.size
+        if target_size is not None:
+            if ori_w >= target_size[0] and ori_h >= target_size[1]:
+                out_images.append(image)
+                continue
 
         inputs = processor(image, return_tensors="pt").to(device)
         with torch.no_grad():
@@ -216,7 +223,7 @@ def _crop_to_square(
     image = image.crop((left, top, right, bottom))
 
     if resize_to:
-        image = image.resize((resize_to, resize_to))
+        image = image.resize((resize_to, resize_to), Image.Resampling.LANCZOS)
 
     return image
 
@@ -239,8 +246,8 @@ def _center_of_mass(mask: Image.Image):
 def load_and_save_masks_and_captions(
     files: Union[str, List[str]],
     output_dir: str,
-    target_size: int = 512,
     target_prompts: Optional[Union[List[str], str]] = None,
+    target_size: int = 512,
     crop_based_on_salience: bool = True,
 ):
     """
@@ -289,8 +296,11 @@ def load_and_save_masks_and_captions(
 
     print(f"Upscaling {len(images)} images...")
     # upscale images anyways
-    images = swin_ir_sr(images)
-    images = [image.resize((target_size, target_size)) for image in images]
+    images = swin_ir_sr(images, target_size=(target_size, target_size))
+    images = [
+        image.resize((target_size, target_size), Image.Resampling.LANCZOS)
+        for image in images
+    ]
 
     seg_masks = [
         _crop_to_square(mask, com, resize_to=target_size)
@@ -299,7 +309,7 @@ def load_and_save_masks_and_captions(
 
     # save images and masks
     for idx, (image, mask, caption) in enumerate(zip(images, seg_masks, captions)):
-        image.save(os.path.join(output_dir, f"{caption}.{idx}.sred.jpg"))
+        image.save(os.path.join(output_dir, f"{caption}.{idx}.src.jpg"), quality=99)
         mask.save(os.path.join(output_dir, f"{idx}.mask.png"))
 
 
