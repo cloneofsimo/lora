@@ -7,6 +7,9 @@ import numpy as np
 from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 from torchvision import transforms
+import glob
+
+from .preprocess_files import face_mask_google_mediapipe
 
 OBJECT_TEMPLATE = [
     "a photo of a {}",
@@ -93,6 +96,7 @@ class PivotalTuningDatasetCapation(Dataset):
         h_flip=True,
         color_jitter=False,
         resize=True,
+        use_mask_captioned_data=False,
         use_face_segmentation_condition=False,
         blur_amount: int = 70,
     ):
@@ -100,11 +104,52 @@ class PivotalTuningDatasetCapation(Dataset):
         self.tokenizer = tokenizer
         self.resize = resize
 
-        self.instance_data_root = Path(instance_data_root)
-        if not self.instance_data_root.exists():
+        instance_data_root = Path(instance_data_root)
+        if not instance_data_root.exists():
             raise ValueError("Instance images root doesn't exists.")
 
-        self.instance_images_path = list(Path(instance_data_root).iterdir())
+        self.instance_images_path = []
+        self.mask_path = []
+
+        # Prepare the instance images
+        if use_mask_captioned_data:
+            ends_with_sredjpg = glob.glob(str(instance_data_root) + "/*src.jpg")
+            for f in ends_with_sredjpg:
+                idx = int(ends_with_sredjpg.split(".")[-2])
+                mask_path = f"{instance_data_root}/{idx}.mask.png"
+
+                if Path(mask_path).exists():
+                    self.instance_images_path.append(f)
+                    self.mask_path.append(mask_path)
+                else:
+                    print(f"Mask not found for {f}")
+
+        else:
+            self.instance_images_path = list(instance_data_root.iterdir())
+
+        assert (
+            len(self.instance_images_path) > 0
+        ), "No images found in the instance data root."
+
+        self.instance_images_path = sorted(self.instance_images_path)
+
+        self.use_mask = use_face_segmentation_condition or use_mask_captioned_data
+
+        if use_face_segmentation_condition:
+            print(
+                "Warning : this will pre-process all the images in the instance data root."
+            )
+
+            if len(self.mask_path) > 0:
+                print("Warning : masks already exists, but will be overwritten.")
+
+            masks = face_mask_google_mediapipe(
+                [Image.open(f) for f in self.instance_images_path]
+            )
+            for idx, mask in enumerate(masks):
+                mask.save(f"{instance_data_root}/{idx}.mask.png")
+                self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
+
         self.num_instance_images = len(self.instance_images_path)
         self.token_map = token_map
 
@@ -122,6 +167,7 @@ class PivotalTuningDatasetCapation(Dataset):
             self.class_prompt = class_prompt
         else:
             self.class_data_root = None
+
         self.h_flip = h_flip
         self.image_transforms = transforms.Compose(
             [
@@ -138,14 +184,6 @@ class PivotalTuningDatasetCapation(Dataset):
             ]
         )
 
-        self.use_face_segmentation_condition = use_face_segmentation_condition
-        if self.use_face_segmentation_condition:
-            import mediapipe as mp
-
-            mp_face_detection = mp.solutions.face_detection
-            self.face_detection = mp_face_detection.FaceDetection(
-                model_selection=1, min_detection_confidence=0.5
-            )
         self.blur_amount = blur_amount
 
     def __len__(self):
@@ -173,57 +211,16 @@ class PivotalTuningDatasetCapation(Dataset):
 
         print(text)
 
-        if self.use_face_segmentation_condition:
-            image = cv2.imread(
-                str(self.instance_images_path[index % self.num_instance_images])
+        if self.use_mask:
+            example["mask"] = self.image_transforms(
+                Image.open(self.mask_path[index % self.num_instance_images])
             )
-            results = self.face_detection.process(
-                cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            )
-            black_image = np.zeros((image.shape[0], image.shape[1]), dtype=np.uint8)
-
-            if results.detections:
-
-                for detection in results.detections:
-
-                    x_min = int(
-                        detection.location_data.relative_bounding_box.xmin
-                        * image.shape[1]
-                    )
-                    y_min = int(
-                        detection.location_data.relative_bounding_box.ymin
-                        * image.shape[0]
-                    )
-                    width = int(
-                        detection.location_data.relative_bounding_box.width
-                        * image.shape[1]
-                    )
-                    height = int(
-                        detection.location_data.relative_bounding_box.height
-                        * image.shape[0]
-                    )
-
-                    # draw the colored rectangle
-                    black_image[y_min : y_min + height, x_min : x_min + width] = 255
-
-            # blur the image
-            black_image = Image.fromarray(black_image, mode="L").filter(
-                ImageFilter.GaussianBlur(radius=self.blur_amount)
-            )
-            # to tensor
-            black_image = transforms.ToTensor()(black_image)
-            # resize as the instance image
-            black_image = transforms.Resize(
-                self.size, interpolation=transforms.InterpolationMode.BILINEAR
-            )(black_image)
-
-            example["mask"] = black_image
 
         if self.h_flip and random.random() > 0.5:
             hflip = transforms.RandomHorizontalFlip(p=1)
 
             example["instance_images"] = hflip(example["instance_images"])
-            if self.use_face_segmentation_condition:
+            if self.use_mask:
                 example["mask"] = hflip(example["mask"])
 
         example["instance_prompt_ids"] = self.tokenizer(
