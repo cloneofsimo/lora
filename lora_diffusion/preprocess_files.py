@@ -2,11 +2,13 @@
 # Have BLIP auto caption
 # Have CLIPSeg auto mask concept
 
-from typing import List, Literal, Union
+from typing import List, Literal, Union, Optional, Tuple
 import os
 from PIL import Image, ImageFilter
 import torch
 import numpy as np
+import fire
+import glob
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 
@@ -58,7 +60,7 @@ def clipseg_mask_generator(
         "CIDAS/clipseg-rd64-refined", "CIDAS/clipseg-rd16"
     ] = "CIDAS/clipseg-rd64-refined",
     device=torch.device("cuda:0" if torch.cuda.is_available() else "cpu"),
-    bias: float = 0.05,
+    bias: float = 0.01,
     **kwargs,
 ) -> List[Image.Image]:
     """
@@ -143,8 +145,6 @@ def face_mask_google_mediapipe(
     """
     Returns a list of images with mask on the face parts.
     """
-    import cv2
-
     import mediapipe as mp
 
     mp_face_detection = mp.solutions.face_detection
@@ -193,3 +193,115 @@ def face_mask_google_mediapipe(
         masks.append(black_image)
 
     return masks
+
+
+def _crop_to_square(
+    image: Image.Image, com: List[Tuple[int, int]], resize_to: Optional[int] = None
+):
+    cx, cy = com
+    width, height = image.size
+    if width > height:
+        left_possible = max(cx - height / 2, 0)
+        left = min(left_possible, width - height)
+        right = left + height
+        top = 0
+        bottom = height
+    else:
+        left = 0
+        right = width
+        top_possible = max(cy - width / 2, 0)
+        top = min(top_possible, height - width)
+        bottom = top + width
+
+    image = image.crop((left, top, right, bottom))
+
+    if resize_to:
+        image = image.resize((resize_to, resize_to))
+
+    return image
+
+
+def _center_of_mass(mask: Image.Image):
+    """
+    Returns the center of mass of the mask
+    """
+    x, y = np.meshgrid(np.arange(mask.size[0]), np.arange(mask.size[1]))
+
+    x_ = x * np.array(mask)
+    y_ = y * np.array(mask)
+
+    x = np.sum(x_) / np.sum(mask)
+    y = np.sum(y_) / np.sum(mask)
+
+    return x, y
+
+
+def load_and_save_masks_and_captions(
+    files: Union[str, List[str]],
+    output_dir: str,
+    target_size: int = 512,
+    target_prompts: Optional[Union[List[str], str]] = None,
+    crop_based_on_salience: bool = True,
+):
+    """
+    Loads images from the given files, generates masks for them, and saves the masks and captions and upscale images
+    to output dir.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # load images
+    if isinstance(files, str):
+        # check if it is a directory
+        if os.path.isdir(files):
+            # get all the .png .jpg in the directory
+            files = glob.glob(os.path.join(files, "*.png")) + glob.glob(
+                os.path.join(files, "*.jpg")
+            )
+        else:
+            files = glob.glob(files)
+
+        if len(files) == 0:
+            raise Exception(
+                f"No files found in {files}. Either {files} is not a directory or it does not contain any .png or .jpg files, or the glob pattern is incorrect."
+            )
+
+    images = [Image.open(file) for file in files]
+
+    # captions
+    print(f"Generating {len(images)} captions...")
+    captions = blip_captioning_dataset(images)
+
+    if target_prompts is None:
+        target_prompts = captions
+
+    print(f"Generating {len(images)} masks...")
+    seg_masks = clipseg_mask_generator(images=images, target_prompts=target_prompts)
+
+    # find the center of mass of the mask
+    if crop_based_on_salience:
+        coms = [_center_of_mass(mask) for mask in seg_masks]
+    else:
+        coms = [(image.size[0] / 2, image.size[1] / 2) for image in images]
+    # based on the center of mass, crop the image to a square
+    images = [
+        _crop_to_square(image, com, resize_to=None) for image, com in zip(images, coms)
+    ]
+
+    print(f"Upscaling {len(images)} images...")
+    # upscale images anyways
+    images = swin_ir_sr(images)
+    images = [image.resize((target_size, target_size)) for image in images]
+
+    seg_masks = [
+        _crop_to_square(mask, com, resize_to=target_size)
+        for mask, com in zip(seg_masks, coms)
+    ]
+
+    # save images and masks
+    for idx, (image, mask, caption) in enumerate(zip(images, seg_masks, captions)):
+        image.save(os.path.join(output_dir, f"{caption}.{idx}.sred.jpg"))
+        mask.save(os.path.join(output_dir, f"{caption}.{idx}.mask.png"))
+
+
+def main():
+    fire.Fire(load_and_save_masks_and_captions)
