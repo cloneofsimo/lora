@@ -3,6 +3,7 @@ import os
 import shutil
 import fire
 from diffusers import StableDiffusionPipeline
+from safetensors.torch import safe_open, save_file
 
 import torch
 from .lora import tune_lora_scale, weight_apply_lora
@@ -18,7 +19,8 @@ def add(
     path_1: str,
     path_2: str,
     output_path: str,
-    alpha: float = 0.5,
+    alpha_1: float = 0.5,
+    alpha_2: float = 0.5,
     mode: Literal[
         "lpl",
         "upl",
@@ -28,46 +30,75 @@ def add(
 ):
     print("Lora Add, mode " + mode)
     if mode == "lpl":
-        for _path_1, _path_2, opt in [(path_1, path_2, "unet")] + (
-            [(_text_lora_path(path_1), _text_lora_path(path_2), "text_encoder")]
-            if with_text_lora
-            else []
-        ):
-            print("Loading", _path_1, _path_2)
-            out_list = []
-            if opt == "text_encoder":
-                if not os.path.exists(_path_1):
-                    print(f"No text encoder found in {_path_1}, skipping...")
-                    continue
-                if not os.path.exists(_path_2):
-                    print(f"No text encoder found in {_path_1}, skipping...")
-                    continue
+        if path_1.endswith(".pt") and path_2.endswith(".pt"):
+            for _path_1, _path_2, opt in [(path_1, path_2, "unet")] + (
+                [(_text_lora_path(path_1), _text_lora_path(path_2), "text_encoder")]
+                if with_text_lora
+                else []
+            ):
+                print("Loading", _path_1, _path_2)
+                out_list = []
+                if opt == "text_encoder":
+                    if not os.path.exists(_path_1):
+                        print(f"No text encoder found in {_path_1}, skipping...")
+                        continue
+                    if not os.path.exists(_path_2):
+                        print(f"No text encoder found in {_path_1}, skipping...")
+                        continue
 
-            l1 = torch.load(_path_1)
-            l2 = torch.load(_path_2)
+                l1 = torch.load(_path_1)
+                l2 = torch.load(_path_2)
 
-            l1pairs = zip(l1[::2], l1[1::2])
-            l2pairs = zip(l2[::2], l2[1::2])
+                l1pairs = zip(l1[::2], l1[1::2])
+                l2pairs = zip(l2[::2], l2[1::2])
 
-            for (x1, y1), (x2, y2) in zip(l1pairs, l2pairs):
-                # print("Merging", x1.shape, y1.shape, x2.shape, y2.shape)
-                x1.data = alpha * x1.data + (1 - alpha) * x2.data
-                y1.data = alpha * y1.data + (1 - alpha) * y2.data
+                for (x1, y1), (x2, y2) in zip(l1pairs, l2pairs):
+                    # print("Merging", x1.shape, y1.shape, x2.shape, y2.shape)
+                    x1.data = alpha_1 * x1.data + (1 - alpha_2) * x2.data
+                    y1.data = alpha_1 * y1.data + (1 - alpha_2) * y2.data
 
-                out_list.append(x1)
-                out_list.append(y1)
+                    out_list.append(x1)
+                    out_list.append(y1)
 
-            if opt == "unet":
+                if opt == "unet":
 
-                print("Saving merged UNET to", output_path)
-                torch.save(out_list, output_path)
+                    print("Saving merged UNET to", output_path)
+                    torch.save(out_list, output_path)
 
-            elif opt == "text_encoder":
-                print("Saving merged text encoder to", _text_lora_path(output_path))
-                torch.save(
-                    out_list,
-                    _text_lora_path(output_path),
-                )
+                elif opt == "text_encoder":
+                    print("Saving merged text encoder to", _text_lora_path(output_path))
+                    torch.save(
+                        out_list,
+                        _text_lora_path(output_path),
+                    )
+
+        elif path_1.endswith(".safetensors") and path_2.endswith(".safetensors"):
+            safeloras_1 = safe_open(path_1, framework="pt", device="cpu")
+            safeloras_2 = safe_open(path_2, framework="pt", device="cpu")
+
+            metadata = dict(safeloras_1.metadata())
+            metadata.update(dict(safeloras_2.metadata()))
+
+            ret_tensor = {}
+
+            for keys in set(list(safeloras_1.keys()) + list(safeloras_2.keys())):
+                if keys.startswith("text_encoder") or keys.startswith("unet"):
+
+                    tens1 = safeloras_1.get_tensor(keys)
+                    tens2 = safeloras_2.get_tensor(keys)
+
+                    tens = alpha_1 * tens1 + alpha_2 * tens2
+                    ret_tensor[keys] = tens
+                else:
+                    if keys in safeloras_1.keys():
+
+                        tens1 = safeloras_1.get_tensor(keys)
+                    else:
+                        tens1 = safeloras_2.get_tensor(keys)
+
+                    ret_tensor[keys] = tens1
+
+            save_file(ret_tensor, output_path, metadata)
 
     elif mode == "upl":
 
