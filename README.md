@@ -34,7 +34,7 @@
 
 ## Main Features
 
-- Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
+- Fine-tune Stable diffusion models twice as fast than dreambooth method, by Low-rank Adaptation
 - Get insanely small end result (1MB ~ 6MB), easy to share and download.
 - Compatible with `diffusers`
 - Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
