@@ -95,6 +95,7 @@ def clipseg_mask_generator(
             text=[prompt, ""],
             images=[image] * 2,
             padding="max_length",
+            truncation=True,
             return_tensors="pt",
         ).to(device)
 
@@ -138,7 +139,9 @@ def blip_captioning_dataset(
 
     for image in images:
         inputs = processor(image, return_tensors="pt").to("cuda")
-        out = model.generate(**inputs, max_length=150)
+        out = model.generate(
+            **inputs, max_length=150, do_sample=True, top_k=50, temperature=0.7
+        )
         caption = processor.decode(out[0], skip_special_tokens=True)
 
         captions.append(caption)
@@ -244,6 +247,7 @@ def load_and_save_masks_and_captions(
     crop_based_on_salience: bool = True,
     use_face_detection_instead: bool = False,
     temp: float = 1.0,
+    n_length: int = -1,
 ):
     """
     Loads images from the given files, generates masks for them, and saves the masks and captions and upscale images
@@ -259,13 +263,14 @@ def load_and_save_masks_and_captions(
             files = glob.glob(os.path.join(files, "*.png")) + glob.glob(
                 os.path.join(files, "*.jpg")
             )
-        else:
-            files = glob.glob(files)
 
         if len(files) == 0:
             raise Exception(
-                f"No files found in {files}. Either {files} is not a directory or it does not contain any .png or .jpg files, or the glob pattern is incorrect."
+                f"No files found in {files}. Either {files} is not a directory or it does not contain any .png or .jpg files."
             )
+        if n_length == -1:
+            n_length = len(files)
+        files = sorted(files)[:n_length]
 
     images = [Image.open(file) for file in files]
 
