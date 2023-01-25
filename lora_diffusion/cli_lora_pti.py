@@ -177,6 +177,7 @@ def loss_step(
     scheduler,
     t_mutliplier=1.0,
     mixed_precision=False,
+    mask_temperature=1.0,
 ):
     weight_dtype = torch.float32
 
@@ -231,14 +232,13 @@ def loss_step(
             )
         )
         # resize to match model_pred
-        mask = (
-            F.interpolate(
-                mask.float(),
-                size=model_pred.shape[-2:],
-                mode="nearest",
-            )
-            + 0.05
+        mask = F.interpolate(
+            mask.float(),
+            size=model_pred.shape[-2:],
+            mode="nearest",
         )
+
+        mask = (mask + 0.01).pow(mask_temperature)
 
         mask = mask / mask.max()
 
@@ -422,6 +422,7 @@ def perform_tuning(
     lr_scheduler_lora,
     lora_unet_target_modules,
     lora_clip_target_modules,
+    mask_temperature,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -447,6 +448,7 @@ def perform_tuning(
                 scheduler,
                 t_mutliplier=0.8,
                 mixed_precision=True,
+                mask_temperature=mask_temperature,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -536,6 +538,7 @@ def train(
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
     use_mask_captioned_data: bool = False,
+    mask_temperature: float = 1.0,
     scale_lr: bool = False,
     lr_scheduler: str = "linear",
     lr_warmup_steps: int = 0,
@@ -787,6 +790,7 @@ def train(
         lr_scheduler_lora=lr_scheduler_lora,
         lora_unet_target_modules=lora_unet_target_modules,
         lora_clip_target_modules=lora_clip_target_modules,
+        mask_temperature=mask_temperature,
     )
 
 
