@@ -8,6 +8,7 @@ from PIL import Image, ImageFilter
 import torch
 import numpy as np
 import fire
+from tqdm import tqdm
 import glob
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
@@ -35,7 +36,7 @@ def swin_ir_sr(
 
     out_images = []
 
-    for image in images:
+    for image in tqdm(images):
 
         ori_w, ori_h = image.size
         if target_size is not None:
@@ -87,7 +88,7 @@ def clipseg_mask_generator(
 
     masks = []
 
-    for image, prompt in zip(images, target_prompts):
+    for image, prompt in tqdm(zip(images, target_prompts)):
 
         original_size = image.size
 
@@ -137,7 +138,7 @@ def blip_captioning_dataset(
     model = BlipForConditionalGeneration.from_pretrained(model_id).to(device)
     captions = []
 
-    for image in images:
+    for image in tqdm(images):
         inputs = processor(image, return_tensors="pt").to("cuda")
         out = model.generate(
             **inputs, max_length=150, do_sample=True, top_k=50, temperature=0.7
@@ -164,7 +165,7 @@ def face_mask_google_mediapipe(
     )
 
     masks = []
-    for image in images:
+    for image in tqdm(images):
 
         image = np.array(image)
 
