@@ -508,7 +508,7 @@ def train(
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
     use_template: Literal[None, "object", "style"] = None,
-    placeholder_tokens: str = "<s>",
+    placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
     class_prompt: Optional[str] = None,
@@ -571,9 +571,14 @@ def train(
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
     # print(placeholder_tokens, initializer_tokens)
-    placeholder_tokens = placeholder_tokens.split("|")
+    if len(placeholder_tokens) == 0:
+        placeholder_tokens = []
+        print("PTI : Placeholder Tokens not given, using null token")
+    else:
+        placeholder_tokens = placeholder_tokens.split("|")
+
     if initializer_tokens is None:
-        print("PTI : Initializer Token not give, random inits")
+        print("PTI : Initializer Tokens not given, doing random inits")
         initializer_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     else:
         initializer_tokens = initializer_tokens.split("|")
@@ -591,8 +596,8 @@ def train(
     else:
         token_map = {"DUMMY": "".join(placeholder_tokens)}
 
-    print("Placeholder Tokens", placeholder_tokens)
-    print("Initializer Tokens", initializer_tokens)
+    print("PTI : Placeholder Tokens", placeholder_tokens)
+    print("PTI : Initializer Tokens", initializer_tokens)
 
     # get the models
     text_encoder, vae, unet, tokenizer, placeholder_token_ids = get_models(
@@ -642,7 +647,7 @@ def train(
         train_dataset, train_batch_size, tokenizer, vae, text_encoder
     )
 
-    index_no_updates = torch.arange(len(tokenizer)) != placeholder_token_ids[0]
+    index_no_updates = torch.arange(len(tokenizer)) != -1
 
     for tok_id in placeholder_token_ids:
         index_no_updates[tok_id] = False
@@ -707,18 +712,18 @@ def train(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
     else:
-        print("USING EXTENDED UNET!!!")
+        print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
             lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
         )
-        print("Will replace modules: ", lora_unet_target_modules)
+        print("PTI : Will replace modules: ", lora_unet_target_modules)
 
         unet_lora_params, _ = inject_trainable_lora_extended(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
     print(f"PTI : has {len(unet_lora_params)} lora")
 
-    print("Before training:")
+    print("PTI : Before training:")
     inspect_lora(unet)
 
     params_to_optimize = [
