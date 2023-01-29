@@ -553,6 +553,7 @@ def train(
     wandb_log_prompt_cnt: int = 10,
     wandb_project_name: str = "new_pti_project",
     wandb_entity: str = "new_pti_entity",
+    enable_xformers_memory_efficient_attention: bool = False,
 ):
     torch.manual_seed(seed)
 
@@ -615,6 +616,16 @@ def train(
 
     if gradient_checkpointing:
         unet.enable_gradient_checkpointing()
+
+    if enable_xformers_memory_efficient_attention:
+        from diffusers.utils.import_utils import is_xformers_available
+
+        if is_xformers_available():
+            unet.enable_xformers_memory_efficient_attention()
+        else:
+            raise ValueError(
+                "xformers is not available. Make sure it is installed correctly"
+            )
 
     if scale_lr:
         unet_lr = learning_rate_unet * gradient_accumulation_steps * train_batch_size
