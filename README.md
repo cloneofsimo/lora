@@ -34,7 +34,7 @@
 
 ## Main Features
 
-- Fine-tune Stable diffusion models twice as faster than dreambooth method, by Low-rank Adaptation
+- Fine-tune Stable diffusion models twice as fast than dreambooth method, by Low-rank Adaptation
 - Get insanely small end result (1MB ~ 6MB), easy to share and download.
 - Compatible with `diffusers`
 - Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
@@ -49,6 +49,14 @@
 - Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
+
+### 2022/01/29
+
+- Dataset pipelines
+- LoRA Applied to Resnet as well, use `--use_extended_lora` to use it.
+- SVD distillation now supports resnet-lora as well.
+- Compvis format Conversion script now works with safetensors, and will for PTI it will return Textual inversion format as well, so you can use it in embeddings folder.
+- 🥳🥳, LoRA is now officially integrated into the amazing Huggingface 🤗 `diffusers` library! Check out the [Blog](https://huggingface.co/blog/lora) and [examples](https://github.com/huggingface/diffusers/tree/main/examples/text_to_image#training-with-lora)! (NOTE : It is CURRENTLY DIFFERENT FILE FORMAT)
 
 ### 2022/01/09
 
@@ -225,7 +233,7 @@ FLAGS
 ### Merging full model with LoRA
 
 ```bash
-$ lora_add --path_1 PATH_TO_DIFFUSER_FORMAT_MODEL --path_2 PATH_TO_LORA.PT --mode upl --alpha 1.0 --output_path OUTPUT_PATH
+$ lora_add PATH_TO_DIFFUSER_FORMAT_MODEL PATH_TO_LORA.safetensors OUTPUT_PATH ALPHA --mode upl
 ```
 
 `path_1` can be both local path or huggingface model name. When adding LoRA to unet, alpha is the constant as below:
@@ -239,46 +247,36 @@ So, set alpha to 1.0 to fully add LoRA. If the LoRA seems to have too much effec
 **Example**
 
 ```bash
-$ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_illust.pt --mode upl --alpha 1.0 --output_path merged_model
+$ lora_add runwayml/stable-diffusion-v1-5 ./example_loras/lora_krk.safetensors ./output_merged 0.8 --mode upl
 ```
 
 ### Mergigng Full model with LoRA and changing to original CKPT format
 
-_TESTED WITH V2, V2.1 ONLY!_
-
 Everything same as above, but with mode `upl-ckpt-v2` instead of `upl`.
 
 ```bash
-$ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_illust.pt --mode upl-ckpt-v2 --alpha 1.2 --output_path merged_model.ckpt
+$ lora_add runwayml/stable-diffusion-v1-5 ./example_loras/lora_krk.safetensors ./output_merged.ckpt 0.7 --mode upl-ckpt-v2
 ```
 
 ### Merging LoRA with LoRA
 
 ```bash
-$ lora_add --path_1 PATH_TO_LORA.PT --path_2 PATH_TO_LORA.PT --mode lpl --alpha 0.5 --output_path OUTPUT_PATH.PT
+$ lora_add PATH_TO_LORA1.safetensors PATH_TO_LORA2.safetensors OUTPUT_PATH.safetensors ALPHA_1 ALPHA_2
 ```
 
 alpha is the ratio of the first model to the second model. i.e.,
 
 $$
-\Delta W = (\alpha A_1 + (1 - \alpha) A_2) (\alpha B_1 + (1 - \alpha) B_2)^T
+\Delta W = (\alpha_1 A_1 + \alpha_2 A_2) (\alpha_1 B_1 + \alpha_2 B_2)^T
 $$
 
-Set alpha to 0.5 to get the average of the two models. Set alpha close to 1.0 to get more effect of the first model, and set alpha close to 0.0 to get more effect of the second model.
+Set $\alpha_1 = \alpha_2 = 0.5$ to get the average of the two models. Set $\alpha_1$ close to 1.0 to get more effect of the first model, and set $\alpha_2$ close to 1.0 to get more effect of the second model.
 
 **Example**
 
 ```bash
-$ lora_add --path_1 lora_illust.pt --path_2 lora_pop.pt --alpha 0.3 --output_path lora_merged.pt
+$ lora_add ./example_loras/analog_svd_rank4.safetensors ./example_loras/lora_krk.safetensors ./krk_analog.safetensors 2.0 0.7
 ```
-
-### More bash examples with Text Encoder Lora:
-
-```bash
-$ lora_add --path_1 stabilityai/stable-diffusion-2-base --path_2 lora_kiriko.pt --mode upl-ckpt-v2 --alpha 1.2 --with_text_lora --output_path merged_model.ckpt
-```
-
-: This will build a `merged_model.ckpt` with LoRA merged with $\alpha=1.2$ and text encoder LoRA.
 
 ### Making Text2Img Inference with trained LoRA
 
