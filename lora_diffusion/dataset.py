@@ -63,6 +63,14 @@ STYLE_TEMPLATE = [
     "a large painting in the style of {}",
 ]
 
+NULL_TEMPLATE = ["{}"]
+
+TEMPLATE_MAP = {
+    "object": OBJECT_TEMPLATE,
+    "style": STYLE_TEMPLATE,
+    "null": NULL_TEMPLATE,
+}
+
 
 def _randomset(lis):
     ret = []
@@ -182,7 +190,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self.token_map = token_map
 
         self.use_template = use_template
-        self.templates = OBJECT_TEMPLATE if use_template == "object" else STYLE_TEMPLATE
+        self.templates = TEMPLATE_MAP[use_template]
 
         self._length = self.num_instance_images
 
