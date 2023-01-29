@@ -149,6 +149,9 @@ class PivotalTuningDatasetCapation(Dataset):
             )
 
             self.instance_images_path = list(set(possibily_src_images))
+            self.captions = [
+                x.split("/")[-1].split(".")[0] for x in self.instance_images_path
+            ]
 
         assert (
             len(self.instance_images_path) > 0
@@ -157,6 +160,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self.instance_images_path = sorted(self.instance_images_path)
 
         self.use_mask = use_face_segmentation_condition or use_mask_captioned_data
+        self.use_mask_captioned_data = use_mask_captioned_data
 
         if use_face_segmentation_condition:
 
@@ -190,7 +194,8 @@ class PivotalTuningDatasetCapation(Dataset):
         self.token_map = token_map
 
         self.use_template = use_template
-        self.templates = TEMPLATE_MAP[use_template]
+        if use_template is not None:
+            self.templates = TEMPLATE_MAP[use_template]
 
         self._length = self.num_instance_images
 
