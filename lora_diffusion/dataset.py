@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import cv2
 import numpy as np
 from PIL import Image, ImageFilter
+from torch import zeros_like
 from torch.utils.data import Dataset
 from torchvision import transforms
 import glob
@@ -85,6 +86,29 @@ def _shuffle(lis):
     return random.sample(lis, len(lis))
 
 
+def _get_cutout_holes(height, width, min_holes=8, max_holes=32, min_height=16, max_height=128, min_width=16, max_width=128):
+    holes = []
+    for _n in range(random.randint(min_holes, max_holes)):
+        hole_height = random.randint(min_height, max_height)
+        hole_width = random.randint(min_width, max_width)
+        y1 = random.randint(0, height - hole_height)
+        x1 = random.randint(0, width - hole_width)
+        y2 = y1 + hole_height
+        x2 = x1 + hole_width
+        holes.append((x1, y1, x2, y2))
+    return holes
+
+
+def _generate_random_mask(image):
+    mask = zeros_like(image[:1])
+    holes = _get_cutout_holes(mask.shape[1], mask.shape[2])
+    for (x1, y1, x2, y2) in holes:
+        mask[:, y1:y2, x1:x2] = 1.
+    if random.uniform(0, 1) < 0.25:
+        mask.fill_(1.)
+    masked_image = image * (mask < 0.5)
+    return mask, masked_image
+
 class PivotalTuningDatasetCapation(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -106,11 +130,13 @@ class PivotalTuningDatasetCapation(Dataset):
         resize=True,
         use_mask_captioned_data=False,
         use_face_segmentation_condition=False,
+        train_inpainting=False,
         blur_amount: int = 70,
     ):
         self.size = size
         self.tokenizer = tokenizer
         self.resize = resize
+        self.train_inpainting = train_inpainting
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -243,6 +269,9 @@ class PivotalTuningDatasetCapation(Dataset):
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
 
+        if self.train_inpainting:
+            example["instance_masks"], example["instance_masked_images"] = _generate_random_mask(example["instance_images"])
+
         if self.use_template:
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
@@ -287,6 +316,8 @@ class PivotalTuningDatasetCapation(Dataset):
             if not class_image.mode == "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
+            if self.train_inpainting:
+                example["class_masks"], example["class_masked_images"] = _generate_random_mask(example["class_images"])
             example["class_prompt_ids"] = self.tokenizer(
                 self.class_prompt,
                 padding="do_not_pad",
