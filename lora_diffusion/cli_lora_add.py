@@ -6,7 +6,13 @@ from diffusers import StableDiffusionPipeline
 from safetensors.torch import safe_open, save_file
 
 import torch
-from .lora import tune_lora_scale, weight_apply_lora
+from .lora import (
+    tune_lora_scale,
+    weight_apply_lora,
+    patch_pipe,
+    collapse_lora,
+    monkeypatch_remove_lora,
+)
 from .to_ckpt_v2 import convert_to_ckpt
 
 
@@ -54,8 +60,8 @@ def add(
 
                 for (x1, y1), (x2, y2) in zip(l1pairs, l2pairs):
                     # print("Merging", x1.shape, y1.shape, x2.shape, y2.shape)
-                    x1.data = alpha_1 * x1.data + (1 - alpha_2) * x2.data
-                    y1.data = alpha_1 * y1.data + (1 - alpha_2) * y2.data
+                    x1.data = alpha_1 * x1.data + alpha_2 * x2.data
+                    y1.data = alpha_1 * y1.data + alpha_2 * y2.data
 
                     out_list.append(x1)
                     out_list.append(y1)
@@ -106,15 +112,13 @@ def add(
             path_1,
         ).to("cpu")
 
-        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
-        if with_text_lora:
+        patch_pipe(loaded_pipeline, path_2)
+        print(alpha_1)
+        collapse_lora(loaded_pipeline.unet, alpha_1)
+        collapse_lora(loaded_pipeline.text_encoder, alpha_1)
 
-            weight_apply_lora(
-                loaded_pipeline.text_encoder,
-                torch.load(_text_lora_path(path_2)),
-                alpha=alpha,
-                target_replace_module=["CLIPAttention"],
-            )
+        monkeypatch_remove_lora(loaded_pipeline.unet)
+        monkeypatch_remove_lora(loaded_pipeline.text_encoder)
 
         loaded_pipeline.save_pretrained(output_path)
 
