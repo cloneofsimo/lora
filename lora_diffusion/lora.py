@@ -563,23 +563,6 @@ def load_safeloras_both(path, device="cpu"):
     return parse_safeloras(safeloras), parse_safeloras_embeds(safeloras)
 
 
-def weight_apply_lora(
-    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, alpha=1.0
-):
-
-    for _m, _n, _child_module in _find_modules(
-        model, target_replace_module, search_class=[nn.Linear]
-    ):
-        weight = _child_module.weight
-
-        up_weight = loras.pop(0).detach().to(weight.device)
-        down_weight = loras.pop(0).detach().to(weight.device)
-
-        # W <- W + U * D
-        weight = weight + alpha * (up_weight @ down_weight).type(weight.dtype)
-        _child_module.weight = nn.Parameter(weight)
-
-
 def collapse_lora(model, alpha=1.0):
 
     for _module, name, _child_module in _find_modules(
@@ -903,8 +886,8 @@ def patch_pipe(
     token: Optional[str] = None,
     r: int = 4,
     patch_unet=True,
-    patch_text=False,
-    patch_ti=False,
+    patch_text=True,
+    patch_ti=True,
     idempotent_token=True,
     unet_target_replace_module=DEFAULT_TARGET_REPLACE,
     text_target_replace_module=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
@@ -951,13 +934,15 @@ def patch_pipe(
         safeloras = safe_open(maybe_unet_path, framework="pt", device="cpu")
         monkeypatch_or_replace_safeloras(pipe, safeloras)
         tok_dict = parse_safeloras_embeds(safeloras)
-        apply_learned_embed_in_clip(
-            tok_dict,
-            pipe.text_encoder,
-            pipe.tokenizer,
-            token=token,
-            idempotent=idempotent_token,
-        )
+        if patch_ti:
+            apply_learned_embed_in_clip(
+                tok_dict,
+                pipe.text_encoder,
+                pipe.tokenizer,
+                token=token,
+                idempotent=idempotent_token,
+            )
+        return tok_dict
 
 
 @torch.no_grad()

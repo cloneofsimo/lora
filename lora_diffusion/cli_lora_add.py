@@ -8,7 +8,6 @@ from safetensors.torch import safe_open, save_file
 import torch
 from .lora import (
     tune_lora_scale,
-    weight_apply_lora,
     patch_pipe,
     collapse_lora,
     monkeypatch_remove_lora,
@@ -128,18 +127,24 @@ def add(
 
     elif mode == "upl-ckpt-v2":
 
+        assert output_path.endswith(".ckpt"), "Only .ckpt files are supported"
+        name = os.path.basename(output_path)[0:-5]
+
+        print(
+            f"You will be using {name} as the token in A1111 webui. Make sure {name} is unique enough token."
+        )
+
         loaded_pipeline = StableDiffusionPipeline.from_pretrained(
             path_1,
         ).to("cpu")
 
-        weight_apply_lora(loaded_pipeline.unet, torch.load(path_2), alpha=alpha)
-        if with_text_lora:
-            weight_apply_lora(
-                loaded_pipeline.text_encoder,
-                torch.load(_text_lora_path(path_2)),
-                alpha=alpha,
-                target_replace_module=["CLIPAttention"],
-            )
+        tok_dict = patch_pipe(loaded_pipeline, path_2, patch_ti=False)
+
+        collapse_lora(loaded_pipeline.unet, alpha_1)
+        collapse_lora(loaded_pipeline.text_encoder, alpha_1)
+
+        monkeypatch_remove_lora(loaded_pipeline.unet)
+        monkeypatch_remove_lora(loaded_pipeline.text_encoder)
 
         _tmp_output = output_path + ".tmp"
 
@@ -147,6 +152,19 @@ def add(
         convert_to_ckpt(_tmp_output, output_path, as_half=True)
         # remove the tmp_output folder
         shutil.rmtree(_tmp_output)
+
+        keys = sorted(tok_dict.keys())
+        tok_catted = torch.stack([tok_dict[k] for k in keys])
+        ret = {
+            "string_to_token": {"*": torch.tensor(265)},
+            "string_to_param": {"*": tok_catted},
+            "name": name,
+        }
+
+        torch.save(ret, output_path[:-5] + ".pt")
+        print(
+            f"Textual embedding saved as {output_path[:-5]}.pt, put it in the embedding folder and use it as {name} in A1111 repo, "
+        )
 
     else:
         print("Unknown mode", mode)
