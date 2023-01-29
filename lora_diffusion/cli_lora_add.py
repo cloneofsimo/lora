@@ -108,12 +108,16 @@ def add(
 
     elif mode == "upl":
 
+        print(
+            f"Merging UNET/CLIP from {path_1} with LoRA from {path_2} to {output_path}. Merging ratio : {alpha_1}."
+        )
+
         loaded_pipeline = StableDiffusionPipeline.from_pretrained(
             path_1,
         ).to("cpu")
 
         patch_pipe(loaded_pipeline, path_2)
-        print(alpha_1)
+
         collapse_lora(loaded_pipeline.unet, alpha_1)
         collapse_lora(loaded_pipeline.text_encoder, alpha_1)
 

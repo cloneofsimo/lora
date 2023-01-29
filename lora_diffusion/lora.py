@@ -580,9 +580,7 @@ def weight_apply_lora(
         _child_module.weight = nn.Parameter(weight)
 
 
-def collapse_lora(model, loras, alpha=1.0):
-
-    idx = 0
+def collapse_lora(model, alpha=1.0):
 
     for _module, name, _child_module in _find_modules(
         model,
@@ -604,10 +602,6 @@ def collapse_lora(model, loras, alpha=1.0):
                 .to(_child_module.linear.weight.device)
             )
 
-            print(_child_module.linear.weight.shape)
-            idx += 1
-            print(idx)
-
         else:
             print("Collapsing Conv Lora in", name)
             _child_module.conv.weight = nn.Parameter(
@@ -621,7 +615,6 @@ def collapse_lora(model, loras, alpha=1.0):
                 .type(_child_module.conv.weight.dtype)
                 .to(_child_module.conv.weight.device)
             )
-            print(_child_module.conv.weight.shape)
 
 
 def monkeypatch_or_replace_lora(
