@@ -177,6 +177,7 @@ def loss_step(
     scheduler,
     t_mutliplier=1.0,
     mixed_precision=False,
+    mask_temperature=1.0,
 ):
     weight_dtype = torch.float32
 
@@ -231,14 +232,13 @@ def loss_step(
             )
         )
         # resize to match model_pred
-        mask = (
-            F.interpolate(
-                mask.float(),
-                size=model_pred.shape[-2:],
-                mode="nearest",
-            )
-            + 0.05
+        mask = F.interpolate(
+            mask.float(),
+            size=model_pred.shape[-2:],
+            mode="nearest",
         )
+
+        mask = (mask + 0.01).pow(mask_temperature)
 
         mask = mask / mask.max()
 
@@ -422,6 +422,7 @@ def perform_tuning(
     lr_scheduler_lora,
     lora_unet_target_modules,
     lora_clip_target_modules,
+    mask_temperature,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -447,6 +448,7 @@ def perform_tuning(
                 scheduler,
                 t_mutliplier=0.8,
                 mixed_precision=True,
+                mask_temperature=mask_temperature,
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -506,7 +508,7 @@ def train(
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
     use_template: Literal[None, "object", "style"] = None,
-    placeholder_tokens: str = "<s>",
+    placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
     class_prompt: Optional[str] = None,
@@ -536,6 +538,7 @@ def train(
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
     use_mask_captioned_data: bool = False,
+    mask_temperature: float = 1.0,
     scale_lr: bool = False,
     lr_scheduler: str = "linear",
     lr_warmup_steps: int = 0,
@@ -568,9 +571,14 @@ def train(
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
     # print(placeholder_tokens, initializer_tokens)
-    placeholder_tokens = placeholder_tokens.split("|")
+    if len(placeholder_tokens) == 0:
+        placeholder_tokens = []
+        print("PTI : Placeholder Tokens not given, using null token")
+    else:
+        placeholder_tokens = placeholder_tokens.split("|")
+
     if initializer_tokens is None:
-        print("PTI : Initializer Token not give, random inits")
+        print("PTI : Initializer Tokens not given, doing random inits")
         initializer_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     else:
         initializer_tokens = initializer_tokens.split("|")
@@ -588,8 +596,8 @@ def train(
     else:
         token_map = {"DUMMY": "".join(placeholder_tokens)}
 
-    print("Placeholder Tokens", placeholder_tokens)
-    print("Initializer Tokens", initializer_tokens)
+    print("PTI : Placeholder Tokens", placeholder_tokens)
+    print("PTI : Initializer Tokens", initializer_tokens)
 
     # get the models
     text_encoder, vae, unet, tokenizer, placeholder_token_ids = get_models(
@@ -639,7 +647,7 @@ def train(
         train_dataset, train_batch_size, tokenizer, vae, text_encoder
     )
 
-    index_no_updates = torch.arange(len(tokenizer)) != placeholder_token_ids[0]
+    index_no_updates = torch.arange(len(tokenizer)) != -1
 
     for tok_id in placeholder_token_ids:
         index_no_updates[tok_id] = False
@@ -704,18 +712,18 @@ def train(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
     else:
-        print("USING EXTENDED UNET!!!")
+        print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
             lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
         )
-        print("Will replace modules: ", lora_unet_target_modules)
+        print("PTI : Will replace modules: ", lora_unet_target_modules)
 
         unet_lora_params, _ = inject_trainable_lora_extended(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
     print(f"PTI : has {len(unet_lora_params)} lora")
 
-    print("Before training:")
+    print("PTI : Before training:")
     inspect_lora(unet)
 
     params_to_optimize = [
@@ -787,6 +795,7 @@ def train(
         lr_scheduler_lora=lr_scheduler_lora,
         lora_unet_target_modules=lora_unet_target_modules,
         lora_clip_target_modules=lora_clip_target_modules,
+        mask_temperature=mask_temperature,
     )
 
 

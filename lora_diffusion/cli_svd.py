@@ -3,27 +3,93 @@ from diffusers import StableDiffusionPipeline
 import torch
 import torch.nn as nn
 
-from .lora import save_all, _find_modules
+from .lora import (
+    save_all,
+    _find_modules,
+    LoraInjectedConv2d,
+    LoraInjectedLinear,
+    inject_trainable_lora,
+    inject_trainable_lora_extended,
+)
 
 
-def _text_lora_path(path: str) -> str:
-    assert path.endswith(".pt"), "Only .pt files are supported"
-    return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
+def _iter_lora(model):
+    for module in model.modules():
+        if isinstance(module, LoraInjectedConv2d) or isinstance(
+            module, LoraInjectedLinear
+        ):
+            yield module
 
 
-def _ti_lora_path(path: str) -> str:
-    assert path.endswith(".pt"), "Only .pt files are supported"
-    return ".".join(path.split(".")[:-1] + ["ti", "pt"])
+def overwrite_base(base_model, tuned_model, rank, clamp_quantile):
+    device = base_model.device
+    dtype = base_model.dtype
 
+    for lor_base, lor_tune in zip(_iter_lora(base_model), _iter_lora(tuned_model)):
 
-def extract_linear_weights(model, target_replace_module):
-    lins = []
-    for _module, name, _child_module in _find_modules(
-        model, target_replace_module, search_class=[nn.Linear]
-    ):
-        lins.append(_child_module.weight)
+        if isinstance(lor_base, LoraInjectedLinear):
+            residual = lor_tune.linear.weight.data - lor_base.linear.weight.data
+            # SVD on residual
+            print("Distill Linear shape ", residual.shape)
+            residual = residual.float()
+            U, S, Vh = torch.linalg.svd(residual)
+            U = U[:, :rank]
+            S = S[:rank]
+            U = U @ torch.diag(S)
 
-    return lins
+            Vh = Vh[:rank, :]
+
+            dist = torch.cat([U.flatten(), Vh.flatten()])
+            hi_val = torch.quantile(dist, clamp_quantile)
+            low_val = -hi_val
+
+            U = U.clamp(low_val, hi_val)
+            Vh = Vh.clamp(low_val, hi_val)
+
+            assert lor_base.lora_up.weight.shape == U.shape
+            assert lor_base.lora_down.weight.shape == Vh.shape
+
+            lor_base.lora_up.weight.data = U.to(device=device, dtype=dtype)
+            lor_base.lora_down.weight.data = Vh.to(device=device, dtype=dtype)
+
+        if isinstance(lor_base, LoraInjectedConv2d):
+            residual = lor_tune.conv.weight.data - lor_base.conv.weight.data
+            print("Distill Conv shape ", residual.shape)
+
+            residual = residual.float()
+            residual = residual.flatten(start_dim=1)
+
+            # SVD on residual
+            U, S, Vh = torch.linalg.svd(residual)
+            U = U[:, :rank]
+            S = S[:rank]
+            U = U @ torch.diag(S)
+
+            Vh = Vh[:rank, :]
+
+            dist = torch.cat([U.flatten(), Vh.flatten()])
+            hi_val = torch.quantile(dist, clamp_quantile)
+            low_val = -hi_val
+
+            U = U.clamp(low_val, hi_val)
+            Vh = Vh.clamp(low_val, hi_val)
+
+            # U is (out_channels, rank) with 1x1 conv. So,
+            U = U.reshape(U.shape[0], U.shape[1], 1, 1)
+            # V is (rank, in_channels * kernel_size1 * kernel_size2)
+            # now reshape:
+            Vh = Vh.reshape(
+                Vh.shape[0],
+                lor_base.conv.in_channels,
+                lor_base.conv.kernel_size[0],
+                lor_base.conv.kernel_size[1],
+            )
+
+            assert lor_base.lora_up.weight.shape == U.shape
+            assert lor_base.lora_down.weight.shape == Vh.shape
+
+            lor_base.lora_up.weight.data = U.to(device=device, dtype=dtype)
+            lor_base.lora_down.weight.data = Vh.to(device=device, dtype=dtype)
 
 
 def svd_distill(
@@ -32,7 +98,7 @@ def svd_distill(
     rank: int = 4,
     clamp_quantile: float = 0.99,
     device: str = "cuda:0",
-    save_path: str = "svd_distill.pt",
+    save_path: str = "svd_distill.safetensors",
 ):
     pipe_base = StableDiffusionPipeline.from_pretrained(
         base_model, torch_dtype=torch.float16
@@ -42,72 +108,38 @@ def svd_distill(
         target_model, torch_dtype=torch.float16
     ).to(device)
 
-    ori_unet = extract_linear_weights(
-        pipe_base.unet, ["CrossAttention", "Attention", "GEGLU"]
+    # Inject unet
+    _ = inject_trainable_lora_extended(pipe_base.unet, r=rank)
+    _ = inject_trainable_lora_extended(pipe_tuned.unet, r=rank)
+
+    overwrite_base(
+        pipe_base.unet, pipe_tuned.unet, rank=rank, clamp_quantile=clamp_quantile
     )
-    ori_clip = extract_linear_weights(pipe_base.text_encoder, ["CLIPAttention"])
 
-    tuned_unet = extract_linear_weights(
-        pipe_tuned.unet, ["CrossAttention", "Attention", "GEGLU"]
+    # Inject text encoder
+    _ = inject_trainable_lora(
+        pipe_base.text_encoder, r=rank, target_replace_module={"CLIPAttention"}
     )
-    tuned_clip = extract_linear_weights(pipe_tuned.text_encoder, ["CLIPAttention"])
+    _ = inject_trainable_lora(
+        pipe_tuned.text_encoder, r=rank, target_replace_module={"CLIPAttention"}
+    )
 
-    diffs_unet = []
-    diffs_clip = []
+    overwrite_base(
+        pipe_base.text_encoder,
+        pipe_tuned.text_encoder,
+        rank=rank,
+        clamp_quantile=clamp_quantile,
+    )
 
-    for ori, tuned in zip(ori_unet, tuned_unet):
-        diffs_unet.append(tuned - ori)
-
-    for ori, tuned in zip(ori_clip, tuned_clip):
-        diffs_clip.append(tuned - ori)
-
-    uds_unet = []
-    uds_clip = []
-    with torch.no_grad():
-        for mat in diffs_unet:
-            mat = mat.float()
-
-            U, S, Vh = torch.linalg.svd(mat)
-
-            U = U[:, :rank]
-            S = S[:rank]
-            U = U @ torch.diag(S)
-
-            Vh = Vh[:rank, :]
-
-            dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, clamp_quantile)
-            low_val = -hi_val
-
-            U = U.clamp(low_val, hi_val)
-            Vh = Vh.clamp(low_val, hi_val)
-
-            uds_unet.append(U)
-            uds_unet.append(Vh)
-
-        for mat in diffs_clip:
-            mat = mat.float()
-
-            U, S, Vh = torch.linalg.svd(mat)
-
-            U = U[:, :rank]
-            S = S[:rank]
-            U = U @ torch.diag(S)
-
-            Vh = Vh[:rank, :]
-
-            dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, clamp_quantile)
-            low_val = -hi_val
-
-            U = U.clamp(low_val, hi_val)
-            Vh = Vh.clamp(low_val, hi_val)
-
-            uds_clip.append(U)
-            uds_clip.append(Vh)
-
-    torch.save(uds_unet, save_path)
-    torch.save(uds_clip, _text_lora_path(save_path))
+    save_all(
+        unet=pipe_base.unet,
+        text_encoder=pipe_base.text_encoder,
+        placeholder_token_ids=None,
+        placeholder_tokens=None,
+        save_path=save_path,
+        save_lora=True,
+        save_ti=False,
+    )
 
 
 def main():

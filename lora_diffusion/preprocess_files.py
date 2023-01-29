@@ -8,6 +8,7 @@ from PIL import Image, ImageFilter
 import torch
 import numpy as np
 import fire
+from tqdm import tqdm
 import glob
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
@@ -35,7 +36,7 @@ def swin_ir_sr(
 
     out_images = []
 
-    for image in images:
+    for image in tqdm(images):
 
         ori_w, ori_h = image.size
         if target_size is not None:
@@ -87,7 +88,7 @@ def clipseg_mask_generator(
 
     masks = []
 
-    for image, prompt in zip(images, target_prompts):
+    for image, prompt in tqdm(zip(images, target_prompts)):
 
         original_size = image.size
 
@@ -95,6 +96,7 @@ def clipseg_mask_generator(
             text=[prompt, ""],
             images=[image] * 2,
             padding="max_length",
+            truncation=True,
             return_tensors="pt",
         ).to(device)
 
@@ -136,9 +138,11 @@ def blip_captioning_dataset(
     model = BlipForConditionalGeneration.from_pretrained(model_id).to(device)
     captions = []
 
-    for image in images:
+    for image in tqdm(images):
         inputs = processor(image, return_tensors="pt").to("cuda")
-        out = model.generate(**inputs, max_length=150)
+        out = model.generate(
+            **inputs, max_length=150, do_sample=True, top_k=50, temperature=0.7
+        )
         caption = processor.decode(out[0], skip_special_tokens=True)
 
         captions.append(caption)
@@ -161,7 +165,7 @@ def face_mask_google_mediapipe(
     )
 
     masks = []
-    for image in images:
+    for image in tqdm(images):
 
         image = np.array(image)
 
@@ -244,6 +248,7 @@ def load_and_save_masks_and_captions(
     crop_based_on_salience: bool = True,
     use_face_detection_instead: bool = False,
     temp: float = 1.0,
+    n_length: int = -1,
 ):
     """
     Loads images from the given files, generates masks for them, and saves the masks and captions and upscale images
@@ -259,13 +264,14 @@ def load_and_save_masks_and_captions(
             files = glob.glob(os.path.join(files, "*.png")) + glob.glob(
                 os.path.join(files, "*.jpg")
             )
-        else:
-            files = glob.glob(files)
 
         if len(files) == 0:
             raise Exception(
-                f"No files found in {files}. Either {files} is not a directory or it does not contain any .png or .jpg files, or the glob pattern is incorrect."
+                f"No files found in {files}. Either {files} is not a directory or it does not contain any .png or .jpg files."
             )
+        if n_length == -1:
+            n_length = len(files)
+        files = sorted(files)[:n_length]
 
     images = [Image.open(file) for file in files]
 
