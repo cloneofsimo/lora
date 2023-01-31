@@ -578,6 +578,10 @@ def train(
     else:
         placeholder_tokens = placeholder_tokens.split("|")
 
+        assert (
+            sorted(placeholder_tokens) == placeholder_tokens
+        ), f"Placeholder tokens should be sorted. Use something like {'|'.join(sorted(placeholder_tokens))}'"
+
     if initializer_tokens is None:
         print("PTI : Initializer Tokens not given, doing random inits")
         initializer_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
