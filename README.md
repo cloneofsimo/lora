@@ -50,6 +50,10 @@
 
 # UPDATES & Notes
 
+### 2022/02/01
+
+- LoRA Joining is now available with `--mode=ljl` flag. Only three parameters are required : `path_to_lora1`, `path_to_lora2`, and `path_to_save`.
+
 ### 2022/01/29
 
 - Dataset pipelines
@@ -106,7 +110,7 @@ First, there is LoRA applied to Dreambooth. The idea is to use prior-preservatio
 
 2. [Textual Inversion](https://arxiv.org/abs/2208.01618)
 
-Second, there is Textual inversion. There is no room to apply LoRA here, but it is worth mensioning. The idea is to instantiate new token, and learn the token embedding via gradient descent. This is a very powerful method, and it is worth trying out if your use case is not focused on fidelity but rather on inverting conceptual ideas.
+Second, there is Textual inversion. There is no room to apply LoRA here, but it is worth mentioning. The idea is to instantiate new token, and learn the token embedding via gradient descent. This is a very powerful method, and it is worth trying out if your use case is not focused on fidelity but rather on inverting conceptual ideas.
 
 3. [Pivotal Tuning](https://arxiv.org/abs/2106.05744)
 
