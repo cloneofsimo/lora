@@ -7,3 +7,4 @@ wandb
 safetensors
 opencv-python
 torchvision
+mediapipe

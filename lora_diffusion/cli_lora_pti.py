@@ -529,6 +529,8 @@ def train(
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
+    lora_dropout_p: float = 0.0,
+    lora_scale: float = 1.0,
     use_extended_lora: bool = False,
     clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-4,
@@ -577,6 +579,10 @@ def train(
         print("PTI : Placeholder Tokens not given, using null token")
     else:
         placeholder_tokens = placeholder_tokens.split("|")
+
+        assert (
+            sorted(placeholder_tokens) == placeholder_tokens
+        ), f"Placeholder tokens should be sorted. Use something like {'|'.join(sorted(placeholder_tokens))}'"
 
     if initializer_tokens is None:
         print("PTI : Initializer Tokens not given, doing random inits")
@@ -720,7 +726,11 @@ def train(
     # Next perform Tuning with LoRA:
     if not use_extended_lora:
         unet_lora_params, _ = inject_trainable_lora(
-            unet, r=lora_rank, target_replace_module=lora_unet_target_modules
+            unet,
+            r=lora_rank,
+            target_replace_module=lora_unet_target_modules,
+            dropout_p=lora_dropout_p,
+            scale=lora_scale,
         )
     else:
         print("PTI : USING EXTENDED UNET!!!")

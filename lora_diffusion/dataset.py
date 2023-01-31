@@ -180,7 +180,10 @@ class PivotalTuningDatasetCapation(Dataset):
                         )
 
                     masks = face_mask_google_mediapipe(
-                        [Image.open(f) for f in self.instance_images_path]
+                        [
+                            Image.open(f).convert("RGB")
+                            for f in self.instance_images_path
+                        ]
                     )
                     for idx, mask in enumerate(masks):
                         mask.save(f"{instance_data_root}/{idx}.mask.png")
