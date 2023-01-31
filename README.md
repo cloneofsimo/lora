@@ -50,11 +50,11 @@
 
 # UPDATES & Notes
 
-### 2022/02/01
+### 2023/02/01
 
 - LoRA Joining is now available with `--mode=ljl` flag. Only three parameters are required : `path_to_lora1`, `path_to_lora2`, and `path_to_save`.
 
-### 2022/01/29
+### 2023/01/29
 
 - Dataset pipelines
 - LoRA Applied to Resnet as well, use `--use_extended_lora` to use it.
@@ -62,7 +62,7 @@
 - Compvis format Conversion script now works with safetensors, and will for PTI it will return Textual inversion format as well, so you can use it in embeddings folder.
 - 🥳🥳, LoRA is now officially integrated into the amazing Huggingface 🤗 `diffusers` library! Check out the [Blog](https://huggingface.co/blog/lora) and [examples](https://github.com/huggingface/diffusers/tree/main/examples/text_to_image#training-with-lora)! (NOTE : It is CURRENTLY DIFFERENT FILE FORMAT)
 
-### 2022/01/09
+### 2023/01/09
 
 - Pivotal Tuning Inversion with extended latent
 - Better textual inversion with Norm prior
