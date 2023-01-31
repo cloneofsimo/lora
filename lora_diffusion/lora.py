@@ -30,19 +30,22 @@ except ImportError:
 
 
 class LoraInjectedLinear(nn.Module):
-    def __init__(self, in_features, out_features, bias=False, r=4, dropout_p=0.1):
+    def __init__(
+        self, in_features, out_features, bias=False, r=4, dropout_p=0.1, scale=1.0
+    ):
         super().__init__()
 
         if r > min(in_features, out_features):
             raise ValueError(
                 f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
             )
-
+        self.r = r
         self.linear = nn.Linear(in_features, out_features, bias)
         self.lora_down = nn.Linear(in_features, r, bias=False)
         self.dropout = nn.Dropout(dropout_p)
         self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.scale = 1.0
+        self.scale = scale
+        self.selector = nn.Identity()
 
         nn.init.normal_(self.lora_down.weight, std=1 / r)
         nn.init.zeros_(self.lora_up.weight)
@@ -50,8 +53,21 @@ class LoraInjectedLinear(nn.Module):
     def forward(self, input):
         return (
             self.linear(input)
-            + self.lora_up(self.dropout(self.lora_down(input))) * self.scale
+            + self.lora_up(self.selector(self.dropout(self.lora_down(input))))
+            * self.scale
         )
+
+    def realize_as_lora(self):
+        return self.lora_up.weight.data * self.scale, self.lora_down.weight.data
+
+    def set_selector_from_diag(self, diag: torch.Tensor):
+        # diag is a 1D tensor of size (r,)
+        assert diag.shape == (self.r,)
+        self.selector = nn.Linear(self.r, self.r, bias=False)
+        self.selector.weight.data = torch.diag(diag)
+        self.selector.weight.data = self.selector.weight.data.to(
+            self.lora_up.weight.device
+        ).to(self.lora_up.weight.dtype)
 
 
 class LoraInjectedConv2d(nn.Module):
@@ -67,13 +83,14 @@ class LoraInjectedConv2d(nn.Module):
         bias: bool = True,
         r: int = 4,
         dropout_p: float = 0.1,
+        scale: float = 1.0,
     ):
         super().__init__()
         if r > min(in_channels, out_channels):
             raise ValueError(
                 f"LoRA rank {r} must be less or equal than {min(in_channels, out_channels)}"
             )
-
+        self.r = r
         self.conv = nn.Conv2d(
             in_channels=in_channels,
             out_channels=out_channels,
@@ -104,7 +121,8 @@ class LoraInjectedConv2d(nn.Module):
             padding=0,
             bias=False,
         )
-        self.scale = 1.0
+        self.selector = nn.Identity()
+        self.scale = scale
 
         nn.init.normal_(self.lora_down.weight, std=1 / r)
         nn.init.zeros_(self.lora_up.weight)
@@ -112,8 +130,30 @@ class LoraInjectedConv2d(nn.Module):
     def forward(self, input):
         return (
             self.conv(input)
-            + self.lora_up(self.dropout(self.lora_down(input))) * self.scale
+            + self.lora_up(self.selector(self.dropout(self.lora_down(input))))
+            * self.scale
         )
+
+    def realize_as_lora(self):
+        return self.lora_up.weight.data * self.scale, self.lora_down.weight.data
+
+    def set_selector_from_diag(self, diag: torch.Tensor):
+        # diag is a 1D tensor of size (r,)
+        assert diag.shape == (self.r,)
+        self.selector = nn.Conv2d(
+            in_channels=self.r,
+            out_channels=self.r,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=False,
+        )
+        self.selector.weight.data = torch.diag(diag)
+
+        # same device + dtype as lora_up
+        self.selector.weight.data = self.selector.weight.data.to(
+            self.lora_up.weight.device
+        ).to(self.lora_up.weight.dtype)
 
 
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
@@ -217,6 +257,7 @@ def inject_trainable_lora(
     target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
     r: int = 4,
     loras=None,  # path to lora .pt
+    verbose: bool = False,
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -233,11 +274,14 @@ def inject_trainable_lora(
     ):
         weight = _child_module.weight
         bias = _child_module.bias
+        if verbose:
+            print("LoRA Injection : injecting lora into ", name)
+            print("LoRA Injection : weight shape", weight.shape)
         _tmp = LoraInjectedLinear(
             _child_module.in_features,
             _child_module.out_features,
             _child_module.bias is not None,
-            r,
+            r=r,
         )
         _tmp.linear.weight = weight
         if bias is not None:
@@ -287,7 +331,7 @@ def inject_trainable_lora_extended(
                 _child_module.in_features,
                 _child_module.out_features,
                 _child_module.bias is not None,
-                r,
+                r=r,
             )
             _tmp.linear.weight = weight
             if bias is not None:
@@ -304,7 +348,7 @@ def inject_trainable_lora_extended(
                 _child_module.dilation,
                 _child_module.groups,
                 _child_module.bias is not None,
-                r,
+                r=r,
             )
 
             _tmp.conv.weight = weight
@@ -342,6 +386,30 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
         search_class=[LoraInjectedLinear, LoraInjectedConv2d],
     ):
         loras.append((_child_module.lora_up, _child_module.lora_down))
+
+    if len(loras) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras
+
+
+def extract_lora_as_tensor(
+    model, target_replace_module=DEFAULT_TARGET_REPLACE, as_fp16=True
+):
+
+    loras = []
+
+    for _m, _n, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[LoraInjectedLinear, LoraInjectedConv2d],
+    ):
+        up, down = _child_module.realize_as_lora()
+        if as_fp16:
+            up = up.to(torch.float16)
+            down = down.to(torch.float16)
+
+        loras.append((up, down))
 
     if len(loras) == 0:
         raise ValueError("No lora injected.")
@@ -395,16 +463,13 @@ def save_safeloras_with_embeds(
         metadata[name] = json.dumps(list(target_replace_module))
 
         for i, (_up, _down) in enumerate(
-            extract_lora_ups_down(model, target_replace_module)
+            extract_lora_as_tensor(model, target_replace_module)
         ):
-            try:
-                rank = getattr(_down, "out_features")
-            except:
-                rank = getattr(_down, "out_channels")
+            rank = _down.shape[0]
 
             metadata[f"{name}:{i}:rank"] = str(rank)
-            weights[f"{name}:{i}:up"] = _up.weight
-            weights[f"{name}:{i}:down"] = _down.weight
+            weights[f"{name}:{i}:up"] = _up
+            weights[f"{name}:{i}:down"] = _down
 
     for token, tensor in embeds.items():
         metadata[token] = EMBED_FLAG
@@ -809,6 +874,12 @@ def tune_lora_scale(model, alpha: float = 1.0):
     for _module in model.modules():
         if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
             _module.scale = alpha
+
+
+def set_lora_diag(model, diag: torch.Tensor):
+    for _module in model.modules():
+        if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
+            _module.set_selector_from_diag(diag)
 
 
 def _text_lora_path(path: str) -> str:

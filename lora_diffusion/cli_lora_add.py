@@ -20,6 +20,53 @@ def _text_lora_path(path: str) -> str:
     return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
 
 
+def lora_join(lora_safetenors: list):
+    metadatas = [dict(safelora.metadata()) for safelora in lora_safetenors]
+    total_metadata = {}
+    total_tensor = {}
+    total_rank = 0
+    for _metadata in metadatas:
+        rankset = []
+        for k, v in _metadata.items():
+            if k.endswith("rank"):
+                rankset.append(int(v))
+
+        assert len(set(rankset)) == 1, "Rank should be the same per model"
+        total_rank += rankset[0]
+        total_metadata.update(_metadata)
+
+    tensorkeys = set()
+    for safelora in lora_safetenors:
+        tensorkeys.update(safelora.keys())
+
+    for keys in tensorkeys:
+        if keys.startswith("text_encoder") or keys.startswith("unet"):
+            tensorset = [safelora.get_tensor(keys) for safelora in lora_safetenors]
+
+            is_down = keys.endswith("down")
+
+            if is_down:
+                _tensor = torch.cat(tensorset, dim=0)
+                assert _tensor.shape[0] == total_rank
+            else:
+                _tensor = torch.cat(tensorset, dim=1)
+                assert _tensor.shape[1] == total_rank
+
+            total_tensor[keys] = _tensor
+            keys_rank = ":".join(keys.split(":")[:-1]) + ":rank"
+            total_metadata[keys_rank] = str(total_rank)
+
+    for idx, safelora in enumerate(lora_safetenors):
+        tokens = [k for k, v in safelora.metadata().items() if v == "<embed>"]
+        for jdx, token in enumerate(sorted(tokens)):
+            del total_metadata[token]
+            total_tensor[f"<s{idx}-{jdx}>"] = safelora.get_tensor(token)
+            total_metadata[f"<s{idx}-{jdx}>"] = "<embed>"
+            print(f"Embedding {token} replaced to <s{idx}-{jdx}>")
+
+    return total_tensor, total_metadata
+
+
 def add(
     path_1: str,
     path_2: str,
@@ -165,6 +212,17 @@ def add(
         print(
             f"Textual embedding saved as {output_path[:-5]}.pt, put it in the embedding folder and use it as {name} in A1111 repo, "
         )
+    elif mode == "ljl":
+        print("Using Join mode : alpha will not have an effect here.")
+        assert path_1.endswith(".safetensors") and path_2.endswith(
+            ".safetensors"
+        ), "Only .safetensors files are supported"
+
+        safeloras_1 = safe_open(path_1, framework="pt", device="cpu")
+        safeloras_2 = safe_open(path_2, framework="pt", device="cpu")
+
+        total_tensor, total_metadata = lora_join([safeloras_1, safeloras_2])
+        save_file(total_tensor, output_path, total_metadata)
 
     else:
         print("Unknown mode", mode)
