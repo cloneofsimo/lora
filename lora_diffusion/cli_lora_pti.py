@@ -530,6 +530,7 @@ def train(
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
     lora_dropout_p: float = 0.0,
+    lora_scale: float = 1.0,
     use_extended_lora: bool = False,
     clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-4,
@@ -729,6 +730,7 @@ def train(
             r=lora_rank,
             target_replace_module=lora_unet_target_modules,
             dropout_p=lora_dropout_p,
+            scale=lora_scale,
         )
     else:
         print("PTI : USING EXTENDED UNET!!!")

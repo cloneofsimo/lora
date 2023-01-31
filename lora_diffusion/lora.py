@@ -259,6 +259,7 @@ def inject_trainable_lora(
     loras=None,  # path to lora .pt
     verbose: bool = False,
     dropout_p: float = 0.0,
+    scale: float = 1.0,
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -284,6 +285,7 @@ def inject_trainable_lora(
             _child_module.bias is not None,
             r=r,
             dropout_p=dropout_p,
+            scale=scale,
         )
         _tmp.linear.weight = weight
         if bias is not None:
