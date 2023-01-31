@@ -53,7 +53,7 @@ class LoraInjectedLinear(nn.Module):
     def forward(self, input):
         return (
             self.linear(input)
-            + self.lora_up(self.selector(self.dropout(self.lora_down(input))))
+            + self.dropout(self.lora_up(self.selector(self.lora_down(input))))
             * self.scale
         )
 
@@ -130,7 +130,7 @@ class LoraInjectedConv2d(nn.Module):
     def forward(self, input):
         return (
             self.conv(input)
-            + self.lora_up(self.selector(self.dropout(self.lora_down(input))))
+            + self.dropout(self.lora_up(self.selector(self.lora_down(input))))
             * self.scale
         )
 
@@ -258,6 +258,7 @@ def inject_trainable_lora(
     r: int = 4,
     loras=None,  # path to lora .pt
     verbose: bool = False,
+    dropout_p: float = 0.0,
 ):
     """
     inject lora into model, and returns lora parameter groups.
@@ -282,6 +283,7 @@ def inject_trainable_lora(
             _child_module.out_features,
             _child_module.bias is not None,
             r=r,
+            dropout_p=dropout_p,
         )
         _tmp.linear.weight = weight
         if bias is not None:

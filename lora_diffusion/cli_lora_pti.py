@@ -529,6 +529,7 @@ def train(
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
+    lora_dropout_p: float = 0.0,
     use_extended_lora: bool = False,
     clip_ti_decay: bool = True,
     learning_rate_unet: float = 1e-4,
@@ -724,7 +725,10 @@ def train(
     # Next perform Tuning with LoRA:
     if not use_extended_lora:
         unet_lora_params, _ = inject_trainable_lora(
-            unet, r=lora_rank, target_replace_module=lora_unet_target_modules
+            unet,
+            r=lora_rank,
+            target_replace_module=lora_unet_target_modules,
+            dropout_p=lora_dropout_p,
         )
     else:
         print("PTI : USING EXTENDED UNET!!!")
