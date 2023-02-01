@@ -223,6 +223,7 @@ class PivotalTuningDatasetCapation(Dataset):
                 transforms.ColorJitter(0.1, 0.1)
                 if color_jitter
                 else transforms.Lambda(lambda x: x),
+                transforms.CenterCrop(size),
                 transforms.ToTensor(),
                 transforms.Normalize([0.5], [0.5]),
             ]
