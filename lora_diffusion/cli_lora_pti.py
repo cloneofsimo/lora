@@ -439,7 +439,7 @@ def perform_tuning(
 
     unet.train()
     text_encoder.train()
-    
+
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
 
@@ -505,7 +505,7 @@ def perform_tuning(
                 )
 
                 print("LORA CLIP Moved", moved)
-                
+
                 if log_wandb:
                     with torch.no_grad():
                         pipe = StableDiffusionPipeline(
@@ -541,7 +541,7 @@ def perform_tuning(
                         )
 
             if global_step >= num_steps:
-                return
+                break
 
     save_all(
         unet,
@@ -865,7 +865,6 @@ def train(
         unet,
         vae,
         text_encoder,
-        
         train_dataloader,
         max_train_steps_tuning,
         scheduler=noise_scheduler,
