@@ -139,9 +139,11 @@ class PivotalTuningDatasetCapation(Dataset):
             self.captions = open(f"{instance_data_root}/caption.txt").readlines()
 
         else:
-            possibily_src_images = glob.glob(
-                str(instance_data_root) + "/*.jpg"
-            ) + glob.glob(str(instance_data_root) + "/*.png")
+            possibily_src_images = (
+                glob.glob(str(instance_data_root) + "/*.jpg")
+                + glob.glob(str(instance_data_root) + "/*.png")
+                + glob.glob(str(instance_data_root) + "/*.jpeg")
+            )
             possibily_src_images = (
                 set(possibily_src_images)
                 - set(glob.glob(str(instance_data_root) + "/*mask.png"))
