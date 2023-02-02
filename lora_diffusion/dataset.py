@@ -139,9 +139,11 @@ class PivotalTuningDatasetCapation(Dataset):
             self.captions = open(f"{instance_data_root}/caption.txt").readlines()
 
         else:
-            possibily_src_images = glob.glob(
-                str(instance_data_root) + "/*.jpg"
-            ) + glob.glob(str(instance_data_root) + "/*.png")
+            possibily_src_images = (
+                glob.glob(str(instance_data_root) + "/*.jpg")
+                + glob.glob(str(instance_data_root) + "/*.png")
+                + glob.glob(str(instance_data_root) + "/*.jpeg")
+            )
             possibily_src_images = (
                 set(possibily_src_images)
                 - set(glob.glob(str(instance_data_root) + "/*mask.png"))
@@ -203,6 +205,8 @@ class PivotalTuningDatasetCapation(Dataset):
         self._length = self.num_instance_images
 
         if class_data_root is not None:
+            assert NotImplementedError, "Prior preservation is not implemented yet."
+
             self.class_data_root = Path(class_data_root)
             self.class_data_root.mkdir(parents=True, exist_ok=True)
             self.class_images_path = list(self.class_data_root.iterdir())
