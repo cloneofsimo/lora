@@ -205,6 +205,8 @@ class PivotalTuningDatasetCapation(Dataset):
         self._length = self.num_instance_images
 
         if class_data_root is not None:
+            assert NotImplementedError, "Prior preservation is not implemented yet."
+
             self.class_data_root = Path(class_data_root)
             self.class_data_root.mkdir(parents=True, exist_ok=True)
             self.class_images_path = list(self.class_data_root.iterdir())
