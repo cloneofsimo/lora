@@ -384,7 +384,7 @@ def train_inversion(
                         # open all images in test_image_path
                         images = []
                         for file in os.listdir(test_image_path):
-                            if file.endswith(".png") or file.endswith(".jpg") or file.endswith(".jpeg"):
+                            if file.lower().endswith(".png") or file.lower().endswith(".jpg") or file.lower().endswith(".jpeg"):
                                 images.append(
                                     Image.open(os.path.join(test_image_path, file))
                                 )
