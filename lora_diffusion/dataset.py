@@ -267,7 +267,7 @@ class PivotalTuningDatasetCapation(Dataset):
                     Image.open(self.mask_path[index % self.num_instance_images])
                 )
                 * 0.5
-                + 1
+                + 0.5
             )
 
         if self.h_flip and random.random() > 0.5:
