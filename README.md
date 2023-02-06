@@ -37,6 +37,7 @@
 - Fine-tune Stable diffusion models twice as fast than dreambooth method, by Low-rank Adaptation
 - Get insanely small end result (1MB ~ 6MB), easy to share and download.
 - Compatible with `diffusers`
+- Support for inpainting
 - Sometimes _even better performance_ than full fine-tuning (but left as future work for extensive comparisons)
 - Merge checkpoints + Build recipes by merging LoRAs together
 - Pipeline to fine-tune CLIP + Unet + token to gain better results.
@@ -49,6 +50,10 @@
 - Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
 # UPDATES & Notes
+
+### 2023/02/06
+
+- Support for training inpainting on LoRA PTI. Use flag `--train-inpainting` with a inpainting stable diffusion base model (see `inpainting_example.sh`).
 
 ### 2023/02/01
 
