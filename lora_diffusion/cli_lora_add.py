@@ -12,64 +12,13 @@ from .lora import (
     collapse_lora,
     monkeypatch_remove_lora,
 )
+from .lora_manager import lora_join
 from .to_ckpt_v2 import convert_to_ckpt
 
 
 def _text_lora_path(path: str) -> str:
     assert path.endswith(".pt"), "Only .pt files are supported"
     return ".".join(path.split(".")[:-1] + ["text_encoder", "pt"])
-
-
-def lora_join(lora_safetenors: list):
-    metadatas = [dict(safelora.metadata()) for safelora in lora_safetenors]
-    total_metadata = {}
-    total_tensor = {}
-    total_rank = 0
-    ranklist = []
-    for _metadata in metadatas:
-        rankset = []
-        for k, v in _metadata.items():
-            if k.endswith("rank"):
-                rankset.append(int(v))
-
-        assert len(set(rankset)) == 1, "Rank should be the same per model"
-        total_rank += rankset[0]
-        total_metadata.update(_metadata)
-        ranklist.append(rankset[0])
-
-    tensorkeys = set()
-    for safelora in lora_safetenors:
-        tensorkeys.update(safelora.keys())
-
-    for keys in tensorkeys:
-        if keys.startswith("text_encoder") or keys.startswith("unet"):
-            tensorset = [safelora.get_tensor(keys) for safelora in lora_safetenors]
-
-            is_down = keys.endswith("down")
-
-            if is_down:
-                _tensor = torch.cat(tensorset, dim=0)
-                assert _tensor.shape[0] == total_rank
-            else:
-                _tensor = torch.cat(tensorset, dim=1)
-                assert _tensor.shape[1] == total_rank
-
-            total_tensor[keys] = _tensor
-            keys_rank = ":".join(keys.split(":")[:-1]) + ":rank"
-            total_metadata[keys_rank] = str(total_rank)
-    token_size_list = []
-    for idx, safelora in enumerate(lora_safetenors):
-        tokens = [k for k, v in safelora.metadata().items() if v == "<embed>"]
-        for jdx, token in enumerate(sorted(tokens)):
-            if total_metadata.get(token, None) is not None:
-                del total_metadata[token]
-            total_tensor[f"<s{idx}-{jdx}>"] = safelora.get_tensor(token)
-            total_metadata[f"<s{idx}-{jdx}>"] = "<embed>"
-            print(f"Embedding {token} replaced to <s{idx}-{jdx}>")
-
-        token_size_list.append(len(tokens))
-
-    return total_tensor, total_metadata, ranklist, token_size_list
 
 
 def add(
