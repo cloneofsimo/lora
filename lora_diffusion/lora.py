@@ -974,6 +974,8 @@ def patch_pipe(
             unet_path = maybe_unet_path[:-6] + ".pt"
         elif maybe_unet_path.endswith(".text_encoder.pt"):
             unet_path = maybe_unet_path[:-16] + ".pt"
+        else:
+            unet_path = maybe_unet_path
 
         ti_path = _ti_lora_path(unet_path)
         text_path = _text_lora_path(unet_path)

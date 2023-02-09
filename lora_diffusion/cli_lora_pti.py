@@ -168,6 +168,52 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
 
     return train_dataloader
 
+def inpainting_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_encoder):
+    def collate_fn(examples):
+        input_ids = [example["instance_prompt_ids"] for example in examples]
+        pixel_values = [example["instance_images"] for example in examples]
+        mask_values = [example["instance_masks"] for example in examples]
+        masked_image_values = [example["instance_masked_images"] for example in examples]
+
+        # Concat class and instance examples for prior preservation.
+        # We do this to avoid doing two forward passes.
+        if examples[0].get("class_prompt_ids", None) is not None:
+            input_ids += [example["class_prompt_ids"] for example in examples]
+            pixel_values += [example["class_images"] for example in examples]
+            mask_values += [example["class_masks"] for example in examples]
+            masked_image_values += [example["class_masked_images"] for example in examples]
+
+        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+        mask_values = torch.stack(mask_values).to(memory_format=torch.contiguous_format).float()
+        masked_image_values = torch.stack(masked_image_values).to(memory_format=torch.contiguous_format).float()
+
+        input_ids = tokenizer.pad(
+            {"input_ids": input_ids},
+            padding="max_length",
+            max_length=tokenizer.model_max_length,
+            return_tensors="pt",
+        ).input_ids
+
+        batch = {
+            "input_ids": input_ids,
+            "pixel_values": pixel_values,
+            "mask_values": mask_values,
+            "masked_image_values": masked_image_values
+        }
+
+        if examples[0].get("mask", None) is not None:
+            batch["mask"] = torch.stack([example["mask"] for example in examples])
+
+        return batch
+
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=train_batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+    )
+
+    return train_dataloader
 
 def loss_step(
     batch,
@@ -175,6 +221,7 @@ def loss_step(
     vae,
     text_encoder,
     scheduler,
+    train_inpainting=False,
     t_mutliplier=1.0,
     mixed_precision=False,
     mask_temperature=1.0,
@@ -185,6 +232,16 @@ def loss_step(
         batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
     ).latent_dist.sample()
     latents = latents * 0.18215
+
+    if train_inpainting:
+        masked_image_latents = vae.encode(
+            batch["masked_image_values"].to(dtype=weight_dtype).to(unet.device)
+        ).latent_dist.sample()
+        masked_image_latents = masked_image_latents * 0.18215
+        mask = F.interpolate(
+            batch["mask_values"].to(dtype=weight_dtype).to(unet.device),
+            scale_factor=1/8
+        )
 
     noise = torch.randn_like(latents)
     bsz = latents.shape[0]
@@ -199,6 +256,11 @@ def loss_step(
 
     noisy_latents = scheduler.add_noise(latents, noise, timesteps)
 
+    if train_inpainting:
+        latent_model_input = torch.cat([noisy_latents, mask, masked_image_latents], dim=1)
+    else:
+        latent_model_input = noisy_latents
+
     if mixed_precision:
         with torch.cuda.amp.autocast():
 
@@ -206,14 +268,14 @@ def loss_step(
                 batch["input_ids"].to(text_encoder.device)
             )[0]
 
-            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+            model_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
     else:
 
         encoder_hidden_states = text_encoder(
             batch["input_ids"].to(text_encoder.device)
         )[0]
 
-        model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
+        model_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
 
     if scheduler.config.prediction_type == "epsilon":
         target = noise
@@ -270,6 +332,7 @@ def train_inversion(
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
+    train_inpainting: bool = False,
     mixed_precision: bool = False,
     clip_ti_decay: bool = True,
 ):
@@ -302,6 +365,7 @@ def train_inversion(
                         vae,
                         text_encoder,
                         scheduler,
+                        train_inpainting=train_inpainting,
                         mixed_precision=mixed_precision,
                     )
                     / accum_iter
@@ -384,7 +448,7 @@ def train_inversion(
                         # open all images in test_image_path
                         images = []
                         for file in os.listdir(test_image_path):
-                            if file.endswith(".png") or file.endswith(".jpg") or file.endswith(".jpeg"):
+                            if file.lower().endswith(".png") or file.lower().endswith(".jpg") or file.lower().endswith(".jpeg"):
                                 images.append(
                                     Image.open(os.path.join(test_image_path, file))
                                 )
@@ -429,6 +493,7 @@ def perform_tuning(
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
+    train_inpainting: bool = False,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -457,6 +522,7 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
+                train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
                 mixed_precision=True,
                 mask_temperature=mask_temperature,
@@ -565,6 +631,7 @@ def train(
     stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
     use_template: Literal[None, "object", "style"] = None,
+    train_inpainting: bool = False,
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
@@ -716,13 +783,19 @@ def train(
         color_jitter=color_jitter,
         use_face_segmentation_condition=use_face_segmentation_condition,
         use_mask_captioned_data=use_mask_captioned_data,
+        train_inpainting=train_inpainting,
     )
 
     train_dataset.blur_amount = 200
 
-    train_dataloader = text2img_dataloader(
-        train_dataset, train_batch_size, tokenizer, vae, text_encoder
-    )
+    if train_inpainting:
+        train_dataloader = inpainting_dataloader(
+            train_dataset, train_batch_size, tokenizer, vae, text_encoder
+        )
+    else:
+        train_dataloader = text2img_dataloader(
+            train_dataset, train_batch_size, tokenizer, vae, text_encoder
+        )
 
     index_no_updates = torch.arange(len(tokenizer)) != -1
 
@@ -776,6 +849,7 @@ def train(
             log_wandb=log_wandb,
             wandb_log_prompt_cnt=wandb_log_prompt_cnt,
             class_token=class_token,
+            train_inpainting=train_inpainting,
             mixed_precision=False,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
@@ -883,6 +957,7 @@ def train(
         log_wandb=log_wandb,
         wandb_log_prompt_cnt=wandb_log_prompt_cnt,
         class_token=class_token,
+        train_inpainting=train_inpainting,
     )
 
 
