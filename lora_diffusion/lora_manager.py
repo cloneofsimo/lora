@@ -12,6 +12,7 @@ from .lora import (
 
 def lora_join(lora_safetenors: list):
     metadatas = [dict(safelora.metadata()) for safelora in lora_safetenors]
+    _total_metadata = {}
     total_metadata = {}
     total_tensor = {}
     total_rank = 0
@@ -24,8 +25,13 @@ def lora_join(lora_safetenors: list):
 
         assert len(set(rankset)) == 1, "Rank should be the same per model"
         total_rank += rankset[0]
-        total_metadata.update(_metadata)
+        _total_metadata.update(_metadata)
         ranklist.append(rankset[0])
+
+    # remove metadata about tokens
+    for k, v in _total_metadata.items():
+        if v != "<embed>":
+            total_metadata[k] = v
 
     tensorkeys = set()
     for safelora in lora_safetenors:
@@ -56,9 +62,6 @@ def lora_join(lora_safetenors: list):
             total_metadata[f"<s{idx}-{jdx}>"] = "<embed>"
 
             print(f"Embedding {token} replaced to <s{idx}-{jdx}>")
-
-            if total_metadata.get(token, None) is not None:
-                del total_metadata[token]
 
         token_size_list.append(len(tokens))
 
