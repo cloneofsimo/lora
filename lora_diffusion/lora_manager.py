@@ -1,3 +1,4 @@
+from typing import List
 import torch
 from safetensors import safe_open
 from diffusers import StableDiffusionPipeline
@@ -50,11 +51,14 @@ def lora_join(lora_safetenors: list):
     for idx, safelora in enumerate(lora_safetenors):
         tokens = [k for k, v in safelora.metadata().items() if v == "<embed>"]
         for jdx, token in enumerate(sorted(tokens)):
-            if total_metadata.get(token, None) is not None:
-                del total_metadata[token]
+
             total_tensor[f"<s{idx}-{jdx}>"] = safelora.get_tensor(token)
             total_metadata[f"<s{idx}-{jdx}>"] = "<embed>"
+
             print(f"Embedding {token} replaced to <s{idx}-{jdx}>")
+
+            if total_metadata.get(token, None) is not None:
+                del total_metadata[token]
 
         token_size_list.append(len(tokens))
 
@@ -77,7 +81,7 @@ class DummySafeTensorObject:
 
 
 class LoRAManager:
-    def __init__(self, lora_paths_list, pipe: StableDiffusionPipeline):
+    def __init__(self, lora_paths_list: List[str], pipe: StableDiffusionPipeline):
 
         self.lora_paths_list = lora_paths_list
         self.pipe = pipe
