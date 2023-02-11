@@ -86,7 +86,16 @@ def _shuffle(lis):
     return random.sample(lis, len(lis))
 
 
-def _get_cutout_holes(height, width, min_holes=8, max_holes=32, min_height=16, max_height=128, min_width=16, max_width=128):
+def _get_cutout_holes(
+    height,
+    width,
+    min_holes=8,
+    max_holes=32,
+    min_height=16,
+    max_height=128,
+    min_width=16,
+    max_width=128,
+):
     holes = []
     for _n in range(random.randint(min_holes, max_holes)):
         hole_height = random.randint(min_height, max_height)
@@ -103,11 +112,12 @@ def _generate_random_mask(image):
     mask = zeros_like(image[:1])
     holes = _get_cutout_holes(mask.shape[1], mask.shape[2])
     for (x1, y1, x2, y2) in holes:
-        mask[:, y1:y2, x1:x2] = 1.
+        mask[:, y1:y2, x1:x2] = 1.0
     if random.uniform(0, 1) < 0.25:
-        mask.fill_(1.)
+        mask.fill_(1.0)
     masked_image = image * (mask < 0.5)
     return mask, masked_image
+
 
 class PivotalTuningDatasetCapation(Dataset):
     """
@@ -274,7 +284,10 @@ class PivotalTuningDatasetCapation(Dataset):
         example["instance_images"] = self.image_transforms(instance_image)
 
         if self.train_inpainting:
-            example["instance_masks"], example["instance_masked_images"] = _generate_random_mask(example["instance_images"])
+            (
+                example["instance_masks"],
+                example["instance_masked_images"],
+            ) = _generate_random_mask(example["instance_images"])
 
         if self.use_template:
             assert self.token_map is not None
@@ -296,7 +309,7 @@ class PivotalTuningDatasetCapation(Dataset):
                     Image.open(self.mask_path[index % self.num_instance_images])
                 )
                 * 0.5
-                + 0.5
+                + 1.0
             )
 
         if self.h_flip and random.random() > 0.5:
@@ -321,7 +334,10 @@ class PivotalTuningDatasetCapation(Dataset):
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
             if self.train_inpainting:
-                example["class_masks"], example["class_masked_images"] = _generate_random_mask(example["class_images"])
+                (
+                    example["class_masks"],
+                    example["class_masked_images"],
+                ) = _generate_random_mask(example["class_images"])
             example["class_prompt_ids"] = self.tokenizer(
                 self.class_prompt,
                 padding="do_not_pad",
