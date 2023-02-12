@@ -168,12 +168,17 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
 
     return train_dataloader
 
-def inpainting_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_encoder):
+
+def inpainting_dataloader(
+    train_dataset, train_batch_size, tokenizer, vae, text_encoder
+):
     def collate_fn(examples):
         input_ids = [example["instance_prompt_ids"] for example in examples]
         pixel_values = [example["instance_images"] for example in examples]
         mask_values = [example["instance_masks"] for example in examples]
-        masked_image_values = [example["instance_masked_images"] for example in examples]
+        masked_image_values = [
+            example["instance_masked_images"] for example in examples
+        ]
 
         # Concat class and instance examples for prior preservation.
         # We do this to avoid doing two forward passes.
@@ -181,11 +186,21 @@ def inpainting_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_
             input_ids += [example["class_prompt_ids"] for example in examples]
             pixel_values += [example["class_images"] for example in examples]
             mask_values += [example["class_masks"] for example in examples]
-            masked_image_values += [example["class_masked_images"] for example in examples]
+            masked_image_values += [
+                example["class_masked_images"] for example in examples
+            ]
 
-        pixel_values = torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
-        mask_values = torch.stack(mask_values).to(memory_format=torch.contiguous_format).float()
-        masked_image_values = torch.stack(masked_image_values).to(memory_format=torch.contiguous_format).float()
+        pixel_values = (
+            torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+        )
+        mask_values = (
+            torch.stack(mask_values).to(memory_format=torch.contiguous_format).float()
+        )
+        masked_image_values = (
+            torch.stack(masked_image_values)
+            .to(memory_format=torch.contiguous_format)
+            .float()
+        )
 
         input_ids = tokenizer.pad(
             {"input_ids": input_ids},
@@ -198,7 +213,7 @@ def inpainting_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_
             "input_ids": input_ids,
             "pixel_values": pixel_values,
             "mask_values": mask_values,
-            "masked_image_values": masked_image_values
+            "masked_image_values": masked_image_values,
         }
 
         if examples[0].get("mask", None) is not None:
@@ -214,6 +229,7 @@ def inpainting_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_
     )
 
     return train_dataloader
+
 
 def loss_step(
     batch,
@@ -240,7 +256,7 @@ def loss_step(
         masked_image_latents = masked_image_latents * 0.18215
         mask = F.interpolate(
             batch["mask_values"].to(dtype=weight_dtype).to(unet.device),
-            scale_factor=1/8
+            scale_factor=1 / 8,
         )
 
     noise = torch.randn_like(latents)
@@ -257,7 +273,9 @@ def loss_step(
     noisy_latents = scheduler.add_noise(latents, noise, timesteps)
 
     if train_inpainting:
-        latent_model_input = torch.cat([noisy_latents, mask, masked_image_latents], dim=1)
+        latent_model_input = torch.cat(
+            [noisy_latents, mask, masked_image_latents], dim=1
+        )
     else:
         latent_model_input = noisy_latents
 
@@ -268,7 +286,9 @@ def loss_step(
                 batch["input_ids"].to(text_encoder.device)
             )[0]
 
-            model_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
+            model_pred = unet(
+                latent_model_input, timesteps, encoder_hidden_states
+            ).sample
     else:
 
         encoder_hidden_states = text_encoder(
@@ -448,7 +468,11 @@ def train_inversion(
                         # open all images in test_image_path
                         images = []
                         for file in os.listdir(test_image_path):
-                            if file.lower().endswith(".png") or file.lower().endswith(".jpg") or file.lower().endswith(".jpeg"):
+                            if (
+                                file.lower().endswith(".png")
+                                or file.lower().endswith(".jpg")
+                                or file.lower().endswith(".jpeg")
+                            ):
                                 images.append(
                                     Image.open(os.path.join(test_image_path, file))
                                 )
@@ -627,18 +651,12 @@ def train(
     train_text_encoder: bool = True,
     pretrained_vae_name_or_path: str = None,
     revision: Optional[str] = None,
-    class_data_dir: Optional[str] = None,
-    stochastic_attribute: Optional[str] = None,
     perform_inversion: bool = True,
     use_template: Literal[None, "object", "style"] = None,
     train_inpainting: bool = False,
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
-    class_prompt: Optional[str] = None,
-    with_prior_preservation: bool = False,
-    prior_loss_weight: float = 1.0,
-    num_class_images: int = 100,
     seed: int = 42,
     resolution: int = 512,
     color_jitter: bool = True,
@@ -649,7 +667,6 @@ def train(
     save_steps: int = 100,
     gradient_accumulation_steps: int = 4,
     gradient_checkpointing: bool = False,
-    mixed_precision="fp16",
     lora_rank: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
@@ -773,11 +790,8 @@ def train(
 
     train_dataset = PivotalTuningDatasetCapation(
         instance_data_root=instance_data_dir,
-        stochastic_attribute=stochastic_attribute,
         token_map=token_map,
         use_template=use_template,
-        class_data_root=class_data_dir if with_prior_preservation else None,
-        class_prompt=class_prompt,
         tokenizer=tokenizer,
         size=resolution,
         color_jitter=color_jitter,
