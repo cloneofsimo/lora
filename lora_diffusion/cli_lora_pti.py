@@ -128,17 +128,31 @@ def get_models(
     )
 
 
-def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_encoder):
+@torch.no_grad()
+def text2img_dataloader(
+    train_dataset,
+    train_batch_size,
+    tokenizer,
+    vae,
+    text_encoder,
+    cached_latents: bool = False,
+):
+
+    if cached_latents:
+        cached_latents_dataset = []
+        for idx in tqdm(range(len(train_dataset))):
+            batch = train_dataset[idx]
+            # rint(batch)
+            latents = vae.encode(
+                batch["instance_images"].unsqueeze(0).to(dtype=vae.dtype).to(vae.device)
+            ).latent_dist.sample()
+            latents = latents * 0.18215
+            batch["instance_images"] = latents.squeeze(0)
+            cached_latents_dataset.append(batch)
+
     def collate_fn(examples):
         input_ids = [example["instance_prompt_ids"] for example in examples]
         pixel_values = [example["instance_images"] for example in examples]
-
-        # Concat class and instance examples for prior preservation.
-        # We do this to avoid doing two forward passes.
-        if examples[0].get("class_prompt_ids", None) is not None:
-            input_ids += [example["class_prompt_ids"] for example in examples]
-            pixel_values += [example["class_images"] for example in examples]
-
         pixel_values = torch.stack(pixel_values)
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
 
@@ -159,12 +173,24 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
 
         return batch
 
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=train_batch_size,
-        shuffle=True,
-        collate_fn=collate_fn,
-    )
+    if cached_latents:
+
+        train_dataloader = torch.utils.data.DataLoader(
+            cached_latents_dataset,
+            batch_size=train_batch_size,
+            shuffle=True,
+            collate_fn=collate_fn,
+        )
+
+        print("PTI : Using cached latent.")
+
+    else:
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=train_batch_size,
+            shuffle=True,
+            collate_fn=collate_fn,
+        )
 
     return train_dataloader
 
@@ -241,23 +267,30 @@ def loss_step(
     t_mutliplier=1.0,
     mixed_precision=False,
     mask_temperature=1.0,
+    cached_latents: bool = False,
 ):
     weight_dtype = torch.float32
-
-    latents = vae.encode(
-        batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
-    ).latent_dist.sample()
-    latents = latents * 0.18215
-
-    if train_inpainting:
-        masked_image_latents = vae.encode(
-            batch["masked_image_values"].to(dtype=weight_dtype).to(unet.device)
+    if not cached_latents:
+        latents = vae.encode(
+            batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
         ).latent_dist.sample()
-        masked_image_latents = masked_image_latents * 0.18215
-        mask = F.interpolate(
-            batch["mask_values"].to(dtype=weight_dtype).to(unet.device),
-            scale_factor=1 / 8,
-        )
+        latents = latents * 0.18215
+
+        if train_inpainting:
+            masked_image_latents = vae.encode(
+                batch["masked_image_values"].to(dtype=weight_dtype).to(unet.device)
+            ).latent_dist.sample()
+            masked_image_latents = masked_image_latents * 0.18215
+            mask = F.interpolate(
+                batch["mask_values"].to(dtype=weight_dtype).to(unet.device),
+                scale_factor=1 / 8,
+            )
+    else:
+        latents = batch["pixel_values"]
+
+        if train_inpainting:
+            masked_image_latents = batch["masked_image_latents"]
+            mask = batch["mask_values"]
 
     noise = torch.randn_like(latents)
     bsz = latents.shape[0]
@@ -348,6 +381,7 @@ def train_inversion(
     tokenizer,
     lr_scheduler,
     test_image_path: str,
+    cached_latents: bool,
     accum_iter: int = 1,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
@@ -387,6 +421,7 @@ def train_inversion(
                         scheduler,
                         train_inpainting=train_inpainting,
                         mixed_precision=mixed_precision,
+                        cached_latents=cached_latents,
                     )
                     / accum_iter
                 )
@@ -514,6 +549,7 @@ def perform_tuning(
     out_name: str,
     tokenizer,
     test_image_path: str,
+    cached_latents: bool,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
@@ -550,6 +586,7 @@ def perform_tuning(
                 t_mutliplier=0.8,
                 mixed_precision=True,
                 mask_temperature=mask_temperature,
+                cached_latents=cached_latents,
             )
             loss_sum += loss.detach().item()
 
@@ -680,6 +717,7 @@ def train(
     continue_inversion: bool = False,
     continue_inversion_lr: Optional[float] = None,
     use_face_segmentation_condition: bool = False,
+    cached_latents: bool = True,
     use_mask_captioned_data: bool = False,
     mask_temperature: float = 1.0,
     scale_lr: bool = False,
@@ -803,12 +841,19 @@ def train(
     train_dataset.blur_amount = 200
 
     if train_inpainting:
+        assert not cached_latents, "Cached latents not supported for inpainting"
+
         train_dataloader = inpainting_dataloader(
             train_dataset, train_batch_size, tokenizer, vae, text_encoder
         )
     else:
         train_dataloader = text2img_dataloader(
-            train_dataset, train_batch_size, tokenizer, vae, text_encoder
+            train_dataset,
+            train_batch_size,
+            tokenizer,
+            vae,
+            text_encoder,
+            cached_latents=cached_latents,
         )
 
     index_no_updates = torch.arange(len(tokenizer)) != -1
@@ -827,6 +872,8 @@ def train(
     for param in params_to_freeze:
         param.requires_grad = False
 
+    if cached_latents:
+        vae = None
     # STEP 1 : Perform Inversion
     if perform_inversion:
         ti_optimizer = optim.AdamW(
@@ -850,6 +897,7 @@ def train(
             text_encoder,
             train_dataloader,
             max_train_steps_ti,
+            cached_latents=cached_latents,
             accum_iter=gradient_accumulation_steps,
             scheduler=noise_scheduler,
             index_no_updates=index_no_updates,
@@ -955,6 +1003,7 @@ def train(
         text_encoder,
         train_dataloader,
         max_train_steps_tuning,
+        cached_latents=cached_latents,
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
         save_steps=save_steps,
