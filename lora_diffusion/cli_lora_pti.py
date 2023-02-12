@@ -361,7 +361,9 @@ def loss_step(
 
         target = target * mask
 
-    loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+    loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
+    loss = loss.sum(0).mean()
+
     return loss
 
 
