@@ -23,7 +23,7 @@ def lora_join(lora_safetenors: list):
             if k.endswith("rank"):
                 rankset.append(int(v))
 
-        assert len(set(rankset)) == 1, "Rank should be the same per model"
+        assert len(set(rankset)) <= 1, "Rank should be the same per model"
         total_rank += rankset[0]
         _total_metadata.update(_metadata)
         ranklist.append(rankset[0])
