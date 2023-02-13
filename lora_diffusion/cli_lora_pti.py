@@ -924,7 +924,7 @@ def train(
             wandb_log_prompt_cnt=wandb_log_prompt_cnt,
             class_token=class_token,
             train_inpainting=train_inpainting,
-            mixed_precision=True,
+            mixed_precision=False,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
         )
