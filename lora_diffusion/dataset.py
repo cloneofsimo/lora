@@ -270,10 +270,8 @@ class PivotalTuningDatasetCapation(Dataset):
                         ]
                     )
                     for idx, mask in enumerate(masks):
-                        # if the entire mask is black, make it white instead:
                         avg_pixel_value = np.array(mask.getdata()).mean()
                         if avg_pixel_value == 1.0:
-                            #mask = Image.new("L", mask.size, 255)
                             print(f"No mask detected for {idx}..")
                         else:
                             if 1:
