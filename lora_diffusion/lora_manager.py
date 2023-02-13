@@ -23,7 +23,10 @@ def lora_join(lora_safetenors: list):
             if k.endswith("rank"):
                 rankset.append(int(v))
 
-        assert len(set(rankset)) == 1, "Rank should be the same per model"
+        assert len(set(rankset)) <= 1, "Rank should be the same per model"
+        if len(rankset) == 0:
+            rankset = [0]
+
         total_rank += rankset[0]
         _total_metadata.update(_metadata)
         ranklist.append(rankset[0])
@@ -118,6 +121,10 @@ class LoRAManager:
         )
 
     def tune(self, scales):
+
+        assert len(scales) == len(
+            self.ranklist
+        ), "Scale list should be the same length as ranklist"
 
         diags = []
         for scale, rank in zip(scales, self.ranklist):
