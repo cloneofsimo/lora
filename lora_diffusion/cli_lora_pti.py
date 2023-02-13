@@ -939,6 +939,7 @@ def train(
 
     if cached_latents:
         vae = None
+
     # STEP 1 : Perform Inversion
     if perform_inversion:
         preview_training_batch(train_dataloader, "inversion")
@@ -1107,10 +1108,6 @@ def train(
     training_time = time.time() - script_start_time
     print(f"Training time: {training_time/60:.1f} minutes")
     args_dict["training_time_s"] = int(training_time)
-
-    # get the templates:
-    if use_template is not None:
-        args_dict["train_template"] = train_dataloader.templates
 
     # Save the args_dict to the output directory as a json file:
     with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
