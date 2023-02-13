@@ -361,8 +361,11 @@ def loss_step(
 
         target = target * mask
 
-    loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
-    loss = loss.sum(0).mean()
+    loss = (
+        F.mse_loss(model_pred.float(), target.float(), reduction="none")
+        .mean([1, 2, 3])
+        .mean()
+    )
 
     return loss
 
@@ -432,6 +435,13 @@ def train_inversion(
                 loss_sum += loss.detach().item()
 
                 if global_step % accum_iter == 0:
+                    # print gradient of text encoder embedding
+                    print(
+                        text_encoder.get_input_embeddings()
+                        .weight.grad[index_updates, :]
+                        .norm(dim=-1)
+                        .mean()
+                    )
                     optimizer.step()
                     optimizer.zero_grad()
 
@@ -914,7 +924,7 @@ def train(
             wandb_log_prompt_cnt=wandb_log_prompt_cnt,
             class_token=class_token,
             train_inpainting=train_inpainting,
-            mixed_precision=False,
+            mixed_precision=True,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
         )
