@@ -44,9 +44,7 @@ from lora_diffusion import (
     save_all,
     prepare_clip_model_sets,
     evaluate_pipe,
-    preview_training_batch,
     UNET_EXTENDED_TARGET_REPLACE,
-
 )
 
 def preview_training_batch(train_dataloader, mode, n_imgs = 40):
@@ -68,7 +66,7 @@ def preview_training_batch(train_dataloader, mode, n_imgs = 40):
             print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
             return
 
-            
+
 def get_models(
     pretrained_model_name_or_path,
     pretrained_vae_name_or_path,
