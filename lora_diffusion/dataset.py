@@ -353,8 +353,7 @@ class PivotalTuningDatasetCapation(Dataset):
             if self.token_map is not None:
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
-
-        mask_str = "using mask! " if self.use_mask else ""
+                    
         print(text)
 
         if self.use_mask:
