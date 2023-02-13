@@ -44,10 +44,31 @@ from lora_diffusion import (
     save_all,
     prepare_clip_model_sets,
     evaluate_pipe,
+    preview_training_batch,
     UNET_EXTENDED_TARGET_REPLACE,
+
 )
 
+def preview_training_batch(train_dataloader, mode, n_imgs = 40):
+    outdir = f"training_batch_preview/{mode}"
+    os.makedirs(outdir, exist_ok=True)
+    imgs_saved = 0
 
+    while True:
+        for batch_i, batch in enumerate(train_dataloader):
+            imgs = batch["pixel_values"]
+            for i, img_torch in enumerate(imgs):
+                img_torch = (img_torch+1) /2
+                # convert to pil and save to disk:
+                img = Image.fromarray((255.*img_torch).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)).convert("RGB")
+                img.save(f"{outdir}/preview_{imgs_saved}.jpg")
+                imgs_saved += 1
+
+        if imgs_saved > n_imgs:
+            print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
+            return
+
+            
 def get_models(
     pretrained_model_name_or_path,
     pretrained_vae_name_or_path,
@@ -723,25 +744,6 @@ def perform_tuning(
         target_replace_module_text=lora_clip_target_modules,
         target_replace_module_unet=lora_unet_target_modules,
     )
-
-def preview_training_batch(train_dataloader, mode, n_imgs = 40):
-    outdir = f"training_batch_preview/{mode}"
-    os.makedirs(outdir, exist_ok=True)
-    imgs_saved = 0
-
-    while True:
-        for batch_i, batch in enumerate(train_dataloader):
-            imgs = batch["pixel_values"]
-            for i, img_torch in enumerate(imgs):
-                img_torch = (img_torch+1) /2
-                # convert to pil and save to disk:
-                img = Image.fromarray((255.*img_torch).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8))
-                img.save(f"{outdir}/preview_{imgs_saved}.jpg")
-                imgs_saved += 1
-
-        if imgs_saved > n_imgs:
-            print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
-            return
 
 def train(
     instance_data_dir: str,

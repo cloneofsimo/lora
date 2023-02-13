@@ -50,7 +50,6 @@ EXAMPLE_PROMPTS = [
     "A watercolor painting of <obj> on a beach",
 ]
 
-
 def image_grid(_imgs, rows=None, cols=None):
 
     if rows is None and cols is None:
