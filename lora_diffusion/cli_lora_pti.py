@@ -12,6 +12,7 @@ import time
 import random
 import re
 from pathlib import Path
+import numpy as np
 from typing import Optional, List, Literal
 
 import torch
@@ -570,13 +571,13 @@ def train_inversion(
                 return
 
 import matplotlib.pyplot as plt
-import numpy as np
 def plot_loss_curve(losses, name, moving_avg=20):
     losses = np.array(losses)
     losses = np.convolve(losses, np.ones(moving_avg)/moving_avg, mode='valid')
     plt.plot(losses)
     plt.xlabel("Step")
     plt.ylabel("Loss")
+    plt.title(f"Losses during {name} phase:")
     plt.savefig(f"{name}.png")
     plt.clf()
 
@@ -623,7 +624,8 @@ def perform_tuning(
     losses = []
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
-        dataloader.dataset.tune_h_flip_prob(epoch / math.ceil(num_steps / len(dataloader)))
+        if not cached_latents:
+            dataloader.dataset.tune_h_flip_prob(epoch / math.ceil(num_steps / len(dataloader)))
 
         for batch in dataloader:
             lr_scheduler_lora.step()
