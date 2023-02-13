@@ -1,7 +1,7 @@
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-
+import numpy as np
 from PIL import Image
 from torch import zeros_like
 from torch.utils.data import Dataset
@@ -353,7 +353,7 @@ class PivotalTuningDatasetCapation(Dataset):
             if self.token_map is not None:
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
-                    
+
         print(text)
 
         if self.use_mask:
