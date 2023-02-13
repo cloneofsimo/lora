@@ -150,7 +150,6 @@ def blip_captioning_dataset(
 
     return captions
 
-
 def face_mask_google_mediapipe(
     images: List[Image.Image], blur_amount: float = 80.0, bias: float = 0.05
 ) -> List[Image.Image]:
