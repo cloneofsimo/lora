@@ -262,9 +262,7 @@ def load_and_save_masks_and_captions(
         # check if it is a directory
         if os.path.isdir(files):
             # get all the .png .jpg in the directory
-            files = glob.glob(os.path.join(files, "*.png")) + glob.glob(
-                os.path.join(files, "*.jpg")
-            )
+            files = glob.glob(os.path.join(files, "*.png")) + glob.glob(os.path.join(files, "*.jpg")) + glob.glob(os.path.join(files, "*.jpeg"))
 
         if len(files) == 0:
             raise Exception(

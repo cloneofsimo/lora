@@ -318,6 +318,9 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self.blur_amount = blur_amount
 
+        print("Captions:")
+        print(self.captions)
+
     def tune_h_flip_prob(self, training_progress, end_prob = 0.25):
         if self.h_flip:
             # Tune the h_flip probability to be 0.5 training_progress is 0 and end_prob when training_progress is 1
