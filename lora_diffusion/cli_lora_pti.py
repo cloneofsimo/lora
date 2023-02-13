@@ -7,6 +7,8 @@ import inspect
 import itertools
 import math
 import os
+import json
+import time
 import random
 import re
 from pathlib import Path
@@ -162,6 +164,7 @@ def text2img_dataloader(train_dataset, train_batch_size, tokenizer, vae, text_en
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_size=train_batch_size,
+        num_workers=4,
         shuffle=True,
         collate_fn=collate_fn,
     )
@@ -337,6 +340,7 @@ def train_inversion(
     clip_ti_decay: bool = True,
 ):
 
+    print("Performing Inversion....")
     progress_bar = tqdm(range(num_steps))
     progress_bar.set_description("Steps")
     global_step = 0
@@ -349,6 +353,7 @@ def train_inversion(
 
     index_updates = ~index_no_updates
     loss_sum = 0.0
+    losses = []
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         unet.eval()
@@ -371,6 +376,7 @@ def train_inversion(
                     / accum_iter
                 )
 
+                losses.append(loss.detach().mean().item())
                 loss.backward()
                 loss_sum += loss.detach().item()
 
@@ -423,6 +429,7 @@ def train_inversion(
                 progress_bar.set_postfix(**logs)
 
             if global_step % save_steps == 0:
+                plot_loss_curve(losses, "textual_inversion")
                 save_all(
                     unet=unet,
                     text_encoder=text_encoder,
@@ -470,6 +477,16 @@ def train_inversion(
             if global_step >= num_steps:
                 return
 
+import matplotlib.pyplot as plt
+import numpy as np
+def plot_loss_curve(losses, name, moving_avg=20):
+    losses = np.array(losses)
+    losses = np.convolve(losses, np.ones(moving_avg)/moving_avg, mode='valid')
+    plt.plot(losses)
+    plt.xlabel("Step")
+    plt.ylabel("Loss")
+    plt.savefig(f"{name}.png")
+    plt.clf()
 
 def perform_tuning(
     unet,
@@ -495,7 +512,7 @@ def perform_tuning(
     class_token: str = "person",
     train_inpainting: bool = False,
 ):
-
+    print("Performing Tuning....")
     progress_bar = tqdm(range(num_steps))
     progress_bar.set_description("Steps")
     global_step = 0
@@ -508,9 +525,13 @@ def perform_tuning(
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
 
+    print(f"Performing {math.ceil(num_steps / len(dataloader))} epochs of training!")
     loss_sum = 0.0
+    losses = []
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
+        dataloader.dataset.tune_h_flip_prob(epoch / math.ceil(num_steps / len(dataloader)))
+
         for batch in dataloader:
             lr_scheduler_lora.step()
 
@@ -540,10 +561,15 @@ def perform_tuning(
                 "lr": lr_scheduler_lora.get_last_lr()[0],
             }
             progress_bar.set_postfix(**logs)
+            losses.append(loss.detach().item())
+
 
             global_step += 1
 
             if global_step % save_steps == 0:
+                # plot the loss curve:
+                plot_loss_curve(losses, "tuning")
+
                 save_all(
                     unet,
                     text_encoder,
@@ -619,6 +645,24 @@ def perform_tuning(
         target_replace_module_unet=lora_unet_target_modules,
     )
 
+def preview_training_batch(train_dataloader, mode, n_imgs = 40):
+    outdir = f"training_batch_preview/{mode}"
+    os.makedirs(outdir, exist_ok=True)
+    imgs_saved = 0
+
+    while True:
+        for batch_i, batch in enumerate(train_dataloader):
+            imgs = batch["pixel_values"]
+            for i, img_torch in enumerate(imgs):
+                img_torch = (img_torch+1) /2
+                # convert to pil and save to disk:
+                img = Image.fromarray((255.*img_torch).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8))
+                img.save(f"{outdir}/preview_{imgs_saved}.jpg")
+                imgs_saved += 1
+
+        if imgs_saved > n_imgs:
+            print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
+            return
 
 def train(
     instance_data_dir: str,
@@ -683,7 +727,11 @@ def train(
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
 ):
+    script_start_time = time.time()
     torch.manual_seed(seed)
+
+    # Get a dict with all the arguments:
+    args_dict = locals()
 
     if log_wandb:
         wandb.init(
@@ -704,7 +752,6 @@ def train(
         print("PTI : Placeholder Tokens not given, using null token")
     else:
         placeholder_tokens = placeholder_tokens.split("|")
-
         assert (
             sorted(placeholder_tokens) == placeholder_tokens
         ), f"Placeholder tokens should be sorted. Use something like {'|'.join(sorted(placeholder_tokens))}'"
@@ -815,6 +862,9 @@ def train(
 
     # STEP 1 : Perform Inversion
     if perform_inversion:
+        preview_training_batch(train_dataloader, "inversion")
+
+        print("PTI : Performing Inversion")
         ti_optimizer = optim.AdamW(
             text_encoder.get_input_embeddings().parameters(),
             lr=ti_lr,
@@ -822,6 +872,9 @@ def train(
             eps=1e-08,
             weight_decay=weight_decay_ti,
         )
+
+        token_ids_positions_to_update = np.where(index_no_updates.cpu().numpy() == 0)
+        print("Training embedding of size", text_encoder.get_input_embeddings().weight[token_ids_positions_to_update].shape)
 
         lr_scheduler = get_scheduler(
             lr_scheduler,
@@ -856,6 +909,7 @@ def train(
         )
 
         del ti_optimizer
+        print("###############  Inversion Done  ###############")
 
     # Next perform Tuning with LoRA:
     if not use_extended_lora:
@@ -866,18 +920,23 @@ def train(
             dropout_p=lora_dropout_p,
             scale=lora_scale,
         )
+        print("PTI : not use_extended_lora...")
     else:
         print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
             lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
         )
         print("PTI : Will replace modules: ", lora_unet_target_modules)
-
         unet_lora_params, _ = inject_trainable_lora_extended(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
-    print(f"PTI : has {len(unet_lora_params)} lora")
 
+    n_optimizable_unet_params = sum(
+        [el.numel() for el in itertools.chain(*unet_lora_params)]
+    )
+    print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
+
+    print(f"PTI : has {len(unet_lora_params)} lora")
     print("PTI : Before training:")
     inspect_lora(unet)
 
@@ -924,6 +983,7 @@ def train(
 
     unet.train()
     if train_text_encoder:
+        print("Training text encoder!")
         text_encoder.train()
 
     train_dataset.blur_amount = 70
@@ -934,6 +994,8 @@ def train(
         num_warmup_steps=lr_warmup_steps_lora,
         num_training_steps=max_train_steps_tuning,
     )
+
+    preview_training_batch(train_dataloader, "tuning")
 
     perform_tuning(
         unet,
@@ -960,6 +1022,21 @@ def train(
         train_inpainting=train_inpainting,
     )
 
+    print("###############  Tuning Done  ###############")
+    training_time = time.time() - script_start_time
+    print(f"Training time: {training_time/60:.1f} minutes")
+    args_dict["training_time_s"] = int(training_time)
+
+    # get the templates:
+    if use_template is not None:
+        args_dict["train_template"] = train_dataloader.templates
+
+    # Save the args_dict to the output directory as a json file:
+    with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
+        json.dump(args_dict, f, default=lambda o: '<not serializable>', indent=2)
 
 def main():
     fire.Fire(train)
+
+if __name__ == "__main__":
+    main()
