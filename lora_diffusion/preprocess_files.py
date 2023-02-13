@@ -324,3 +324,7 @@ def load_and_save_masks_and_captions(
 
 def main():
     fire.Fire(load_and_save_masks_and_captions)
+
+
+if __name__ == "__main__":
+    main()
