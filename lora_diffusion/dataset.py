@@ -2,14 +2,11 @@ import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-import cv2
-import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 from torch import zeros_like
 from torch.utils.data import Dataset
 from torchvision import transforms
 import glob
-
 from .preprocess_files import face_mask_google_mediapipe
 
 OBJECT_TEMPLATE = [
@@ -128,12 +125,9 @@ class PivotalTuningDatasetCapation(Dataset):
     def __init__(
         self,
         instance_data_root,
-        stochastic_attribute,
         tokenizer,
         token_map: Optional[dict] = None,
         use_template: Optional[str] = None,
-        class_data_root=None,
-        class_prompt=None,
         size=512,
         h_flip=True,
         color_jitter=False,
@@ -240,18 +234,6 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self._length = self.num_instance_images
 
-        if class_data_root is not None:
-            assert NotImplementedError, "Prior preservation is not implemented yet."
-
-            self.class_data_root = Path(class_data_root)
-            self.class_data_root.mkdir(parents=True, exist_ok=True)
-            self.class_images_path = list(self.class_data_root.iterdir())
-            self.num_class_images = len(self.class_images_path)
-            self._length = max(self.num_class_images, self.num_instance_images)
-            self.class_prompt = class_prompt
-        else:
-            self.class_data_root = None
-
         self.h_flip = h_flip
         self.image_transforms = transforms.Compose(
             [
@@ -325,24 +307,5 @@ class PivotalTuningDatasetCapation(Dataset):
             truncation=True,
             max_length=self.tokenizer.model_max_length,
         ).input_ids
-
-        if self.class_data_root:
-            class_image = Image.open(
-                self.class_images_path[index % self.num_class_images]
-            )
-            if not class_image.mode == "RGB":
-                class_image = class_image.convert("RGB")
-            example["class_images"] = self.image_transforms(class_image)
-            if self.train_inpainting:
-                (
-                    example["class_masks"],
-                    example["class_masked_images"],
-                ) = _generate_random_mask(example["class_images"])
-            example["class_prompt_ids"] = self.tokenizer(
-                self.class_prompt,
-                padding="do_not_pad",
-                truncation=True,
-                max_length=self.tokenizer.model_max_length,
-            ).input_ids
 
         return example
