@@ -1071,8 +1071,8 @@ def train(
         num_warmup_steps=lr_warmup_steps_lora,
         num_training_steps=max_train_steps_tuning,
     )
-
-    preview_training_batch(train_dataloader, "tuning")
+    if not cached_latents: 
+        preview_training_batch(train_dataloader, "tuning")
 
     perform_tuning(
         unet,
