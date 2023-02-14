@@ -6,14 +6,28 @@ from diffusers import StableDiffusionPipeline
 from safetensors.torch import safe_open, save_file
 
 import torch
-from .lora import (
-    tune_lora_scale,
-    patch_pipe,
-    collapse_lora,
-    monkeypatch_remove_lora,
-)
-from .lora_manager import lora_join
-from .to_ckpt_v2 import convert_to_ckpt
+
+try:
+    from .lora import (
+        tune_lora_scale,
+        patch_pipe,
+        collapse_lora,
+        monkeypatch_remove_lora,
+    )
+
+    from .lora_manager import lora_join
+    from .to_ckpt_v2 import convert_to_ckpt
+
+except:  # allows running the repo without installing it (can mess up existing dependencies)
+    from lora_diffusion import (
+        tune_lora_scale,
+        patch_pipe,
+        collapse_lora,
+        monkeypatch_remove_lora,
+    )
+
+    from lora_diffusion.lora_manager import lora_join
+    from lora_diffusion.to_ckpt_v2 import convert_to_ckpt
 
 
 def _text_lora_path(path: str) -> str:
@@ -185,3 +199,7 @@ def add(
 
 def main():
     fire.Fire(add)
+
+
+if __name__ == "__main__":
+    main()
