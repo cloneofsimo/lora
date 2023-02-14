@@ -41,6 +41,7 @@ OBJECT_TEMPLATE = [
 
 PERSON_TEMPLATE = [
     "{}",
+    "{}",
     "a picture of {}",
     "a closeup of {}",
     "a closeup photo of {}",
@@ -55,17 +56,21 @@ PERSON_TEMPLATE = [
     "a photo of the beautiful {}",
     "a selfie taken by the handsome {}",
     "a selfie taken by {}",
+    "{} taking a selfie",
+    "{} is having fun, 4k photograph",
+    "{} wearing a plaidered shirt standing next to another person",
+    "smiling {} in a hoodie and sweater",
     "a photo of the cool {}",
     "a close-up photo of {}",
     "a bright photo of {}",
     "a cropped photo of {}",
-    "a good photo of {}",
+    "a brilliant HD photo of {}",
     "a beautiful picture of {}",
     "a photo showing {}",
-    "a good photo of {}",
+    "a great photo of {}",
 ]
 
-STYLE_TEMPLATE = [
+STYLE_TEMPLATE_ORIG = [
     "a painting in the style of {}",
     "a rendering in the style of {}",
     "a cropped painting in the style of {}",
@@ -86,6 +91,23 @@ STYLE_TEMPLATE = [
     "a weird painting in the style of {}",
     "a large painting in the style of {}",
 ]
+
+STYLE_TEMPLATE = [
+    "a painting in the style of {}",
+    "a rendering in the style of {}",
+    "an artwork in the style of {}",
+    "a magnificent painting in the style of {}",
+    "a picture in the style of {}",
+    "a photograph, {} style",
+    "{} style painting",
+    "a {}-styled artwork",
+    "a nice painting in the style of {}",
+    "a goregous example of {} style",
+    "image in the style of {}",
+    "{}, painting",
+    "{} artwork"
+]
+
 
 NULL_TEMPLATE = ["{}"]
 
@@ -191,6 +213,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self.resize = resize
         self.train_inpainting = train_inpainting
         self.h_flip_prob = 0.5
+        self.final_flip_prob = 0.33 if use_template == 'person' else 0.5
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -321,10 +344,10 @@ class PivotalTuningDatasetCapation(Dataset):
         print("Captions:")
         print(self.captions)
 
-    def tune_h_flip_prob(self, training_progress, end_prob = 0.25):
+    def tune_h_flip_prob(self, training_progress):
         if self.h_flip:
             # Tune the h_flip probability to be 0.5 training_progress is 0 and end_prob when training_progress is 1
-            self.h_flip_prob = 0.5 + (end_prob - 0.5) * training_progress
+            self.h_flip_prob = 0.5 + (self.final_flip_prob - 0.5) * training_progress
             print(f"h_flip_prob: {self.h_flip_prob:.3f}")
 
     def __len__(self):
@@ -357,7 +380,8 @@ class PivotalTuningDatasetCapation(Dataset):
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
 
-        print(text)
+        if random.random() < 0.1:
+            print(text)
 
         if self.use_mask:
             img_mask = Image.open(self.mask_path[index % self.num_instance_images])

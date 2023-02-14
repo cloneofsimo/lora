@@ -130,6 +130,11 @@ def get_models(
             initializer_token_id = token_ids[0]
             token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
 
+            # print some stats about the token embedding:
+            t = token_embeds[placeholder_token_id]
+            print(f"init_token {init_tok} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
+
+
     vae = AutoencoderKL.from_pretrained(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
         subfolder=None if pretrained_vae_name_or_path else "vae",
@@ -288,6 +293,7 @@ def loss_step(
     vae,
     text_encoder,
     scheduler,
+    optimized_embeddings = None,
     train_inpainting=False,
     t_mutliplier=1.0,
     mixed_precision=False,
@@ -392,6 +398,12 @@ def loss_step(
         .mean()
     )
 
+    if optimized_embeddings is not None:
+        embedding_norm = optimized_embeddings.norm(dim=1).mean()
+        target_norm = 0.39
+        embedding_norm_loss = (embedding_norm - target_norm)**2
+        loss += 0.005*embedding_norm_loss
+
     return loss
 
 
@@ -451,6 +463,7 @@ def train_inversion(
                         vae,
                         text_encoder,
                         scheduler,
+                        optimized_embeddings = text_encoder.get_input_embeddings().weight[index_updates, :],
                         train_inpainting=train_inpainting,
                         mixed_precision=mixed_precision,
                         cached_latents=cached_latents,
@@ -494,19 +507,18 @@ def train_inversion(
                             ) * (
                                 pre_norm + lambda_ * (0.4 - pre_norm)
                             )
-                            print(pre_norm)
+                            #print(pre_norm)
 
-                        current_norm = (
-                            text_encoder.get_input_embeddings()
-                            .weight[index_updates, :]
-                            .norm(dim=-1)
-                        )
+                        optimizing_embeds = text_encoder.get_input_embeddings().weight[index_updates, :]
+                        current_norm = (optimizing_embeds.norm(dim=-1))
 
+                        # reset original embeddings (we're only optimizing the new token ones)
                         text_encoder.get_input_embeddings().weight[
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
-
-                        print(f"Current Norm : {current_norm}")
+                        
+                        for i, t in enumerate(optimizing_embeds):
+                            print(f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
 
                 global_step += 1
                 progress_bar.update(1)
@@ -601,6 +613,7 @@ def perform_tuning(
     tokenizer,
     test_image_path: str,
     cached_latents: bool,
+    index_no_updates = None,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
@@ -615,6 +628,9 @@ def perform_tuning(
 
     unet.train()
     text_encoder.train()
+
+    # Save the current token embeddings:
+    orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
 
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
@@ -638,6 +654,7 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
+                optimized_embeddings = text_encoder.get_input_embeddings().weight[:, :],
                 train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
                 mixed_precision=True,
@@ -658,6 +675,13 @@ def perform_tuning(
             }
             progress_bar.set_postfix(**logs)
             losses.append(loss.detach().item())
+
+            if index_no_updates is not None:
+                with torch.no_grad():
+                    # reset original embeddings (we're only optimizing the new tokens)
+                    text_encoder.get_input_embeddings().weight[
+                        index_no_updates
+                    ] = orig_embeds_params[index_no_updates]
 
 
             global_step += 1
@@ -749,7 +773,7 @@ def train(
     pretrained_vae_name_or_path: str = None,
     revision: Optional[str] = None,
     perform_inversion: bool = True,
-    use_template: Literal[None, "object", "style"] = None,
+    use_template: Literal[None, "object", "style", "person"] = None,
     train_inpainting: bool = False,
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
@@ -1044,6 +1068,7 @@ def train(
             param.requires_grad = False
     else:
         text_encoder.requires_grad_(False)
+
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder,
@@ -1082,6 +1107,7 @@ def train(
         text_encoder,
         train_dataloader,
         max_train_steps_tuning,
+        index_no_updates = index_no_updates,
         cached_latents=cached_latents,
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
