@@ -67,6 +67,29 @@ def preview_training_batch(train_dataloader, mode, n_imgs = 40):
             print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
             return
 
+def sim_matrix(a, b, eps=1e-8):
+    """
+    added eps for numerical stability
+    """
+    b_n = b.norm(dim=1)[:, None]
+    a_norm = a / torch.max(b_n, eps * torch.ones_like(b_n))
+    b_norm = b / torch.max(b_n, eps * torch.ones_like(b_n))
+    sim_mt = torch.mm(a_norm, b_norm.transpose(0, 1))
+    return sim_mt
+
+def print_most_similar_tokens(tokenizer, optimized_tokens, text_encoder):
+    # get all the token embeddings:
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+
+    # Compute the cosine-similarity between the optimized tokens and all the other tokens
+    similarity = sim_matrix(optimized_tokens, token_embeds).squeeze()
+    similarity = similarity.cpu().numpy()
+
+    # print similarity for the most similar tokens:
+    most_similar_tokens = np.argsort(similarity)[::-1]
+    for token_id in most_similar_tokens[:5]:
+        print(f"{tokenizer.decode(token_id)}: {similarity[token_id]:.4f}")
+
 
 def get_models(
     pretrained_model_name_or_path,
@@ -517,8 +540,11 @@ def train_inversion(
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
                         
-                        for i, t in enumerate(optimizing_embeds):
-                            print(f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
+                        if global_step % 10 == 0:
+                            print("----------------------")
+                            for i, t in enumerate(optimizing_embeds):
+                                print(f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
+                                print_most_similar_tokens(tokenizer, t.unsqueeze(0), text_encoder)
 
                 global_step += 1
                 progress_bar.update(1)
@@ -654,7 +680,7 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
-                optimized_embeddings = text_encoder.get_input_embeddings().weight[:, :],
+                optimized_embeddings = text_encoder.get_input_embeddings().weight[~index_no_updates, :], 
                 train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
                 mixed_precision=True,
@@ -824,6 +850,10 @@ def train(
 ):
     script_start_time = time.time()
     torch.manual_seed(seed)
+
+    if use_template == "person" and not use_face_segmentation_condition:
+        print("###  WARNING  ### : Using person template without face segmentation condition")
+        print("When training people, it is highly recommended to use face segmentation condition!!")
 
     # Get a dict with all the arguments:
     args_dict = locals()
