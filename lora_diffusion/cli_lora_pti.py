@@ -77,37 +77,41 @@ def sim_matrix(a, b, eps=1e-8):
     sim_mt = torch.mm(a_norm, b_norm.transpose(0, 1))
     return sim_mt
 
-def compute_pairwise_distances(x, y):
-    # compute the L2 distance of each row in x to each row in y (both are torch tensors)
-    n = x.size(0)
-    m = y.size(0)
-    assert x.size(1) == y.size(1)
 
-    x = x.unsqueeze(1).expand(n, m, x.size(1))
-    y = y.unsqueeze(0).expand(n, m, x.size(1))
+def compute_pairwise_distances(x,y):
+    # compute the L2 distance of each row in x to each row in y (both are torch tensors)
+    # x is a torch tensor of shape (m, d)
+    # y is a torch tensor of shape (n, d)
+    # returns a torch tensor of shape (m, n)
+
+    n = y.shape[0]
+    m = x.shape[0]
+    d = x.shape[1]
+
+    x = x.unsqueeze(1).expand(m, n, d)
+    y = y.unsqueeze(0).expand(m, n, d)
 
     return torch.pow(x - y, 2).sum(2)
 
-def print_most_similar_tokens(tokenizer, optimized_tokens, text_encoder, n=5):
-    # get all the token embeddings:
-    token_embeds = text_encoder.get_input_embeddings().weight.data
 
-    # Compute the cosine-similarity between the optimized tokens and all the other tokens
-    similarity = sim_matrix(optimized_tokens, token_embeds).squeeze()
-    similarity = similarity.cpu().numpy()
+def print_most_similar_tokens(tokenizer, optimized_token, text_encoder, n=10):
+    with torch.no_grad():
+        # get all the token embeddings:
+        token_embeds = text_encoder.get_input_embeddings().weight.data
 
-    distances = compute_pairwise_distances(optimized_tokens, token_embeds).squeeze()
-    distances = distances.cpu().numpy()
+        # Compute the cosine-similarity between the optimized tokens and all the other tokens
+        similarity = sim_matrix(optimized_token.unsqueeze(0), token_embeds).squeeze()
+        similarity = similarity.detach().cpu().numpy()
 
-    # print similarity for the most similar tokens:
-    most_similar_tokens = np.argsort(similarity)[::-1]
-    # print embedding of most similar token:
-    embd = token_embeds[most_similar_tokens[0]]
-    
-    #print(f"Embedding of token: {embd[:].cpu().detach().numpy()}")
-    print(f"--- Most similar tokens to {tokenizer.decode(most_similar_tokens[0])}:")
-    for token_id in most_similar_tokens[1:n+1]:
-        print(f"sim of {similarity[token_id]:.3f} & L2 of {distances[token_id]:.3f} with \"{tokenizer.decode(token_id)}\"")
+        distances = compute_pairwise_distances(optimized_token.unsqueeze(0), token_embeds).squeeze()
+        distances = distances.detach().cpu().numpy()
+
+        # print similarity for the most similar tokens:
+        most_similar_tokens = np.argsort(similarity)[::-1]
+
+        print(f"{tokenizer.decode(most_similar_tokens[0])} --> mean: {optimized_token.mean().item():.3f}, std: {optimized_token.std().item():.3f}, norm: {optimized_token.norm():.4f}")
+        for token_id in most_similar_tokens[1:n+1]:
+            print(f"sim of {similarity[token_id]:.3f} & L2 of {distances[token_id]:.3f} with \"{tokenizer.decode(token_id)}\"")
 
 
 def get_models(
@@ -559,11 +563,10 @@ def train_inversion(
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
                         
-                        if global_step % 20 == 0:
+                        if global_step % 50 == 0:
                             print("------------------------------")
                             for i, t in enumerate(optimizing_embeds):
-                                print(f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
-                                print_most_similar_tokens(tokenizer, t.unsqueeze(0), text_encoder)
+                                print_most_similar_tokens(tokenizer, t, text_encoder)
 
                 global_step += 1
                 progress_bar.update(1)
@@ -727,6 +730,12 @@ def perform_tuning(
                     text_encoder.get_input_embeddings().weight[
                         index_no_updates
                     ] = orig_embeds_params[index_no_updates]
+
+            if global_step % 100 == 0:
+                optimizing_embeds = text_encoder.get_input_embeddings().weight[~index_no_updates]
+                print("------------------------------")
+                for i, t in enumerate(optimizing_embeds):
+                    print_most_similar_tokens(tokenizer, t, text_encoder)
 
 
             global_step += 1
