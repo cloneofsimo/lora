@@ -523,12 +523,13 @@ def train_inversion(
 
                 if global_step % accum_iter == 0:
                     # print gradient of text encoder embedding
-                    print(
-                        text_encoder.get_input_embeddings()
-                        .weight.grad[index_updates, :]
-                        .norm(dim=-1)
-                        .mean()
-                    )
+                    if 0:
+                        print(
+                            text_encoder.get_input_embeddings()
+                            .weight.grad[index_updates, :]
+                            .norm(dim=-1)
+                            .mean()
+                        )
                     optimizer.step()
                     optimizer.zero_grad()
 
