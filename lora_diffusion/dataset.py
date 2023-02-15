@@ -207,8 +207,7 @@ class PivotalTuningDatasetCapation(Dataset):
         resize=True,
         use_mask_captioned_data=False,
         use_face_segmentation_condition=False,
-        train_inpainting=False,
-        blur_amount: int = 70,
+        train_inpainting=False
     ):
         self.size = size
         self.tokenizer = tokenizer
@@ -341,8 +340,6 @@ class PivotalTuningDatasetCapation(Dataset):
             ]
         )
 
-        self.blur_amount = blur_amount
-
         print("Captions:")
         print(self.captions)
 
@@ -350,7 +347,6 @@ class PivotalTuningDatasetCapation(Dataset):
         if self.h_flip:
             # Tune the h_flip probability to be 0.5 training_progress is 0 and end_prob when training_progress is 1
             self.h_flip_prob = 0.5 + (self.final_flip_prob - 0.5) * training_progress
-            print(f"h_flip_prob: {self.h_flip_prob:.3f}")
 
     def __len__(self):
         return self._length

@@ -46,6 +46,8 @@ from lora_diffusion import (
     prepare_clip_model_sets,
     evaluate_pipe,
     UNET_EXTENDED_TARGET_REPLACE,
+    parse_safeloras_embeds,
+    apply_learned_embed_in_clip,
 )
 
 def preview_training_batch(train_dataloader, mode, n_imgs = 40):
@@ -586,7 +588,7 @@ def train_inversion(
                     placeholder_token_ids=placeholder_token_ids,
                     placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(
-                        save_path, f"step_inv_{global_step}.safetensors"
+                        save_path, f"step_inv_{global_step:04d}.safetensors"
                     ),
                     save_lora=False,
                 )
@@ -751,7 +753,7 @@ def perform_tuning(
                     placeholder_token_ids=placeholder_token_ids,
                     placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(
-                        save_path, f"step_{global_step}.safetensors"
+                        save_path, f"step_{global_step:04d}.safetensors"
                     ),
                     target_replace_module_text=lora_clip_target_modules,
                     target_replace_module_unet=lora_unet_target_modules,
@@ -761,8 +763,8 @@ def perform_tuning(
                     .mean()
                     .item()
                 )
-
                 print("LORA Unet Moved", moved)
+
                 moved = (
                     torch.tensor(
                         list(itertools.chain(*inspect_lora(text_encoder).values()))
@@ -770,7 +772,6 @@ def perform_tuning(
                     .mean()
                     .item()
                 )
-
                 print("LORA CLIP Moved", moved)
 
                 if log_wandb:
@@ -833,6 +834,7 @@ def train(
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
+    load_pretrained_inversion_embeddings_path: Optional[str] = None,
     seed: int = 42,
     resolution: int = 512,
     color_jitter: bool = True,
@@ -880,6 +882,9 @@ def train(
     script_start_time = time.time()
     torch.manual_seed(seed)
 
+    lora_rank_unet = lora_rank
+    lora_rank_text_encoder = lora_rank
+
     if use_template == "person" and not use_face_segmentation_condition:
         print("###  WARNING  ### : Using person template without face segmentation condition")
         print("When training people, it is highly recommended to use face segmentation condition!!")
@@ -900,7 +905,7 @@ def train(
 
     if output_dir is not None:
         os.makedirs(output_dir, exist_ok=True)
-    # print(placeholder_tokens, initializer_tokens)
+
     if len(placeholder_tokens) == 0:
         placeholder_tokens = []
         print("PTI : Placeholder Tokens not given, using null token")
@@ -933,6 +938,7 @@ def train(
 
     print("PTI : Placeholder Tokens", placeholder_tokens)
     print("PTI : Initializer Tokens", initializer_tokens)
+    print("PTI : Token Map: ", token_map)
 
     # get the models
     text_encoder, vae, unet, tokenizer, placeholder_token_ids = get_models(
@@ -984,8 +990,6 @@ def train(
         train_inpainting=train_inpainting,
     )
 
-    train_dataset.blur_amount = 200
-
     if train_inpainting:
         assert not cached_latents, "Cached latents not supported for inpainting"
 
@@ -1022,7 +1026,7 @@ def train(
         vae = None
 
     # STEP 1 : Perform Inversion
-    if perform_inversion and not cached_latents:
+    if perform_inversion and not cached_latents and (load_pretrained_inversion_embeddings_path is None):
         preview_training_batch(train_dataloader, "inversion")
 
         print("PTI : Performing Inversion")
@@ -1073,16 +1077,32 @@ def train(
         del ti_optimizer
         print("###############  Inversion Done  ###############")
 
+    elif load_pretrained_inversion_embeddings_path is not None:
+
+        print("PTI : Loading pretrained inversion embeddings..")
+        from safetensors.torch import safe_open
+        # Load the pretrained embeddings from the lora file:
+        safeloras = safe_open(load_pretrained_inversion_embeddings_path, framework="pt", device="cpu")
+        #monkeypatch_or_replace_safeloras(pipe, safeloras)
+        tok_dict = parse_safeloras_embeds(safeloras)
+        apply_learned_embed_in_clip(
+                tok_dict,
+                text_encoder,
+                tokenizer,
+                idempotent=True,
+            )
+
     # Next perform Tuning with LoRA:
     if not use_extended_lora:
         unet_lora_params, _ = inject_trainable_lora(
             unet,
-            r=lora_rank,
+            r=lora_rank_unet,
             target_replace_module=lora_unet_target_modules,
             dropout_p=lora_dropout_p,
             scale=lora_scale,
         )
         print("PTI : not use_extended_lora...")
+        print("PTI : Will replace modules: ", lora_unet_target_modules)
     else:
         print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
@@ -1090,16 +1110,11 @@ def train(
         )
         print("PTI : Will replace modules: ", lora_unet_target_modules)
         unet_lora_params, _ = inject_trainable_lora_extended(
-            unet, r=lora_rank, target_replace_module=lora_unet_target_modules
+            unet, r=lora_rank_unet, target_replace_module=lora_unet_target_modules
         )
 
-    n_optimizable_unet_params = sum(
-        [el.numel() for el in itertools.chain(*unet_lora_params)]
-    )
-    print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
-    print(f"PTI : has {len(unet_lora_params)} lora")
-    print("PTI : Before training:")
-    inspect_lora(unet)
+    #n_optimizable_unet_params = sum([el.numel() for el in itertools.chain(*unet_lora_params)])
+    #print("PTI : Number of optimizable UNET parameters: ", n_optimizable_unet_params)
 
     params_to_optimize = [
         {"params": itertools.chain(*unet_lora_params), "lr": unet_lr},
@@ -1131,15 +1146,15 @@ def train(
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder,
             target_replace_module=lora_clip_target_modules,
-            r=lora_rank,
+            r=lora_rank_text_encoder,
         )
         params_to_optimize += [
-            {
-                "params": itertools.chain(*text_encoder_lora_params),
-                "lr": text_encoder_lr,
-            }
+            {"params": itertools.chain(*text_encoder_lora_params),
+                "lr": text_encoder_lr}
         ]
-        inspect_lora(text_encoder)
+
+        #n_optimizable_text_Encoder_params = sum( [el.numel() for el in itertools.chain(*text_encoder_lora_params)])
+        #print("PTI : Number of optimizable text-encoder parameters: ", n_optimizable_text_Encoder_params)
 
     lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
 
@@ -1147,8 +1162,6 @@ def train(
     if train_text_encoder:
         print("Training text encoder!")
         text_encoder.train()
-
-    train_dataset.blur_amount = 70
 
     lr_scheduler_lora = get_scheduler(
         lr_scheduler_lora,
@@ -1158,6 +1171,22 @@ def train(
     )
     if not cached_latents: 
         preview_training_batch(train_dataloader, "tuning")
+
+    #print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
+    print(f"PTI : has {len(unet_lora_params)} lora")
+    print("PTI : Before training:")
+
+    moved = (
+        torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
+        .mean().item())
+    print(f"LORA Unet Moved {moved:.6f}")
+
+
+    moved = (
+        torch.tensor(
+            list(itertools.chain(*inspect_lora(text_encoder).values()))
+        ).mean().item())
+    print(f"LORA CLIP Moved {moved:.6f}")
 
     perform_tuning(
         unet,
@@ -1190,6 +1219,7 @@ def train(
     training_time = time.time() - script_start_time
     print(f"Training time: {training_time/60:.1f} minutes")
     args_dict["training_time_s"] = int(training_time)
+    args_dict["n_epochs"] = math.ceil(max_train_steps_tuning / len(train_dataloader))
 
     # Save the args_dict to the output directory as a json file:
     with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
