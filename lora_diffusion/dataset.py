@@ -105,7 +105,7 @@ STYLE_TEMPLATE = [
     "a goregous example of {} style",
     "image in the style of {}",
     "{}, painting",
-    "{} artwork"
+    "{} artwork",
 ]
 
 
@@ -169,22 +169,29 @@ def expand_rectangle(mask, f):
     rows, cols = np.where(mask == 255)
     top_row, bottom_row = np.min(rows), np.max(rows)
     left_col, right_col = np.min(cols), np.max(cols)
-    
+
     rect_height, rect_width = bottom_row - top_row + 1, right_col - left_col + 1
     new_height, new_width = np.round(rect_height * f), np.round(rect_width * f)
-    
-    center_row, center_col = top_row + rect_height // 2, left_col + rect_width // 2
-    top_row, bottom_row = np.round(center_row - new_height / 2), np.round(center_row + new_height / 2)
-    left_col, right_col = np.round(center_col - new_width / 2), np.round(center_col + new_width / 2)
-    
-    top_row, bottom_row = int(np.clip(top_row, 0, mask.shape[0] - 1)), int(np.clip(bottom_row, 0, mask.shape[0] - 1))
-    left_col, right_col = int(np.clip(left_col, 0, mask.shape[1] - 1)), int(np.clip(right_col, 0, mask.shape[1] - 1))
-    
-    expanded_mask = np.ones_like(mask)
-    expanded_mask[top_row:bottom_row + 1, left_col:right_col + 1] = 255
-    
-    return expanded_mask
 
+    center_row, center_col = top_row + rect_height // 2, left_col + rect_width // 2
+    top_row, bottom_row = np.round(center_row - new_height / 2), np.round(
+        center_row + new_height / 2
+    )
+    left_col, right_col = np.round(center_col - new_width / 2), np.round(
+        center_col + new_width / 2
+    )
+
+    top_row, bottom_row = int(np.clip(top_row, 0, mask.shape[0] - 1)), int(
+        np.clip(bottom_row, 0, mask.shape[0] - 1)
+    )
+    left_col, right_col = int(np.clip(left_col, 0, mask.shape[1] - 1)), int(
+        np.clip(right_col, 0, mask.shape[1] - 1)
+    )
+
+    expanded_mask = np.ones_like(mask)
+    expanded_mask[top_row : bottom_row + 1, left_col : right_col + 1] = 255
+
+    return expanded_mask
 
 
 class PivotalTuningDatasetCapation(Dataset):
@@ -213,7 +220,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self.resize = resize
         self.train_inpainting = train_inpainting
         self.h_flip_prob = 0.5
-        self.final_flip_prob = 0.33 if use_template == 'person' else 0.5
+        self.final_flip_prob = 0.33 if use_template == "person" else 0.5
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -229,7 +236,9 @@ class PivotalTuningDatasetCapation(Dataset):
         # Prepare the instance images
         if use_mask_captioned_data:
             src_imgs = glob.glob(str(instance_data_root) + "/*src.jpg")
-            src_imgs = sorted(src_imgs, key=lambda x: int(str(Path(x).stem).split(".")[0]))
+            src_imgs = sorted(
+                src_imgs, key=lambda x: int(str(Path(x).stem).split(".")[0])
+            )
 
             for f in src_imgs:
                 idx = int(str(Path(f).stem).split(".")[0])
@@ -385,7 +394,7 @@ class PivotalTuningDatasetCapation(Dataset):
 
         if self.use_mask:
             img_mask = Image.open(self.mask_path[index % self.num_instance_images])
-            example["mask"] = (self.image_transforms(img_mask)* 0.5 + 1.0)
+            example["mask"] = self.image_transforms(img_mask) * 0.5 + 1.0
 
         if self.h_flip and random.random() < self.h_flip_prob:
             hflip = transforms.RandomHorizontalFlip(p=1)
