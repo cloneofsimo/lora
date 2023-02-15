@@ -632,7 +632,7 @@ def train_inversion(
                 return
 
 import matplotlib.pyplot as plt
-def plot_loss_curve(losses, name, moving_avg=20):
+def plot_loss_curve(losses, name, moving_avg=5):
     losses = np.array(losses)
     losses = np.convolve(losses, np.ones(moving_avg)/moving_avg, mode='valid')
     plt.plot(losses)
@@ -1097,7 +1097,6 @@ def train(
         [el.numel() for el in itertools.chain(*unet_lora_params)]
     )
     print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
-
     print(f"PTI : has {len(unet_lora_params)} lora")
     print("PTI : Before training:")
     inspect_lora(unet)
