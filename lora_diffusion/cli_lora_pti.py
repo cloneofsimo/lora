@@ -48,8 +48,6 @@ from lora_diffusion import (
     UNET_EXTENDED_TARGET_REPLACE,
 )
 
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
 
 def preview_training_batch(train_dataloader, mode, n_imgs=40):
     outdir = f"training_batch_preview/{mode}"
@@ -185,7 +183,7 @@ def text2img_dataloader(
                 batch["instance_images"].unsqueeze(0).to(dtype=vae.dtype).to(vae.device)
             ).latent_dist.sample()
             latents = latents * 0.18215
-            batch["instance_images"] = latents.squeeze(0).cpu()
+            batch["instance_images"] = latents.squeeze(0)
             cached_latents_dataset.append(batch)
 
     def collate_fn(examples):
@@ -216,10 +214,8 @@ def text2img_dataloader(
         train_dataloader = torch.utils.data.DataLoader(
             cached_latents_dataset,
             batch_size=train_batch_size,
-            num_workers=4,
             shuffle=True,
             collate_fn=collate_fn,
-            pin_memory=True,
         )
 
         print("PTI : Using cached latent.")
@@ -1062,12 +1058,6 @@ def train(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
 
-    n_optimizable_unet_params = sum(
-        [el.numel() for el in itertools.chain(*unet_lora_params)]
-    )
-    print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
-
-    print(f"PTI : has {len(unet_lora_params)} lora")
     print("PTI : Before training:")
     inspect_lora(unet)
 
@@ -1112,7 +1102,15 @@ def train(
         inspect_lora(text_encoder)
 
     lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
+    with torch.no_grad():
+        n_optimizable_unet_params = sum(
+            p.numel() for p in unet.parameters() if p.requires_grad
+        )
+        +sum(p.numel() for p in text_encoder.parameters() if p.requires_grad)
 
+    print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
+
+    print(f"PTI : has {len(unet_lora_params)} lora")
     unet.train()
     if train_text_encoder:
         print("Training text encoder!")
