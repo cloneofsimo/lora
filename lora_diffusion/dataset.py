@@ -312,7 +312,7 @@ class PivotalTuningDatasetCapation(Dataset):
                                 # Make the rectangular mask region bigger:
                                 mask = expand_rectangle(mask, 1.25)
                                 # convert back to PIL image:
-                                mask = Image.fromarray(mask)
+                                mask = Image.fromarray(mask).convert("L")
 
                         mask.save(f"{instance_data_root}/{idx}.mask.png")
 
