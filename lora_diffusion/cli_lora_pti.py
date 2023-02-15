@@ -48,7 +48,10 @@ from lora_diffusion import (
     UNET_EXTENDED_TARGET_REPLACE,
 )
 
-def preview_training_batch(train_dataloader, mode, n_imgs = 40):
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
+
+def preview_training_batch(train_dataloader, mode, n_imgs=40):
     outdir = f"training_batch_preview/{mode}"
     os.makedirs(outdir, exist_ok=True)
     imgs_saved = 0
@@ -57,9 +60,16 @@ def preview_training_batch(train_dataloader, mode, n_imgs = 40):
         for batch_i, batch in enumerate(train_dataloader):
             imgs = batch["pixel_values"]
             for i, img_torch in enumerate(imgs):
-                img_torch = (img_torch+1) /2
+                img_torch = (img_torch + 1) / 2
                 # convert to pil and save to disk:
-                img = Image.fromarray((255.*img_torch).permute(1, 2, 0).detach().cpu().numpy().astype(np.uint8)).convert("RGB")
+                img = Image.fromarray(
+                    (255.0 * img_torch)
+                    .permute(1, 2, 0)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .astype(np.uint8)
+                ).convert("RGB")
                 img.save(f"{outdir}/preview_{imgs_saved}.jpg")
                 imgs_saved += 1
 
@@ -132,8 +142,9 @@ def get_models(
 
             # print some stats about the token embedding:
             t = token_embeds[placeholder_token_id]
-            print(f"init_token {init_tok} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
-
+            print(
+                f"init_token {init_tok} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}"
+            )
 
     vae = AutoencoderKL.from_pretrained(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
@@ -174,7 +185,7 @@ def text2img_dataloader(
                 batch["instance_images"].unsqueeze(0).to(dtype=vae.dtype).to(vae.device)
             ).latent_dist.sample()
             latents = latents * 0.18215
-            batch["instance_images"] = latents.squeeze(0)
+            batch["instance_images"] = latents.squeeze(0).cpu()
             cached_latents_dataset.append(batch)
 
     def collate_fn(examples):
@@ -208,6 +219,7 @@ def text2img_dataloader(
             num_workers=4,
             shuffle=True,
             collate_fn=collate_fn,
+            pin_memory=True,
         )
 
         print("PTI : Using cached latent.")
@@ -278,7 +290,7 @@ def inpainting_dataloader(
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        num_workers = 4,
+        num_workers=4,
         batch_size=train_batch_size,
         shuffle=True,
         collate_fn=collate_fn,
@@ -293,7 +305,7 @@ def loss_step(
     vae,
     text_encoder,
     scheduler,
-    optimized_embeddings = None,
+    optimized_embeddings=None,
     train_inpainting=False,
     t_mutliplier=1.0,
     mixed_precision=False,
@@ -317,11 +329,11 @@ def loss_step(
                 scale_factor=1 / 8,
             )
     else:
-        latents = batch["pixel_values"]
+        latents = batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
 
         if train_inpainting:
             masked_image_latents = batch["masked_image_latents"]
-            mask = batch["mask_values"]
+            mask = batch["mask_values"].to(dtype=weight_dtype).to(unet.device)
 
     noise = torch.randn_like(latents)
     bsz = latents.shape[0]
@@ -401,8 +413,8 @@ def loss_step(
     if optimized_embeddings is not None:
         embedding_norm = optimized_embeddings.norm(dim=1).mean()
         target_norm = 0.39
-        embedding_norm_loss = (embedding_norm - target_norm)**2
-        loss += 0.005*embedding_norm_loss
+        embedding_norm_loss = (embedding_norm - target_norm) ** 2
+        loss += 0.005 * embedding_norm_loss
 
     return loss
 
@@ -463,7 +475,7 @@ def train_inversion(
                         vae,
                         text_encoder,
                         scheduler,
-                        optimized_embeddings = text_encoder.get_input_embeddings().weight[index_updates, :],
+                        optimized_embeddings=None,
                         train_inpainting=train_inpainting,
                         mixed_precision=mixed_precision,
                         cached_latents=cached_latents,
@@ -507,18 +519,22 @@ def train_inversion(
                             ) * (
                                 pre_norm + lambda_ * (0.4 - pre_norm)
                             )
-                            #print(pre_norm)
+                            # print(pre_norm)
 
-                        optimizing_embeds = text_encoder.get_input_embeddings().weight[index_updates, :]
-                        current_norm = (optimizing_embeds.norm(dim=-1))
+                        optimizing_embeds = text_encoder.get_input_embeddings().weight[
+                            index_updates, :
+                        ]
+                        current_norm = optimizing_embeds.norm(dim=-1)
 
                         # reset original embeddings (we're only optimizing the new token ones)
                         text_encoder.get_input_embeddings().weight[
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
-                        
+
                         for i, t in enumerate(optimizing_embeds):
-                            print(f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}")
+                            print(
+                                f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}"
+                            )
 
                 global_step += 1
                 progress_bar.update(1)
@@ -582,16 +598,20 @@ def train_inversion(
             if global_step >= num_steps:
                 return
 
+
 import matplotlib.pyplot as plt
+
+
 def plot_loss_curve(losses, name, moving_avg=20):
     losses = np.array(losses)
-    losses = np.convolve(losses, np.ones(moving_avg)/moving_avg, mode='valid')
+    losses = np.convolve(losses, np.ones(moving_avg) / moving_avg, mode="valid")
     plt.plot(losses)
     plt.xlabel("Step")
     plt.ylabel("Loss")
     plt.title(f"Losses during {name} phase:")
     plt.savefig(f"{name}.png")
     plt.clf()
+
 
 def perform_tuning(
     unet,
@@ -613,7 +633,7 @@ def perform_tuning(
     tokenizer,
     test_image_path: str,
     cached_latents: bool,
-    index_no_updates = None,
+    index_no_updates=None,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
@@ -641,7 +661,9 @@ def perform_tuning(
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         if not cached_latents:
-            dataloader.dataset.tune_h_flip_prob(epoch / math.ceil(num_steps / len(dataloader)))
+            dataloader.dataset.tune_h_flip_prob(
+                epoch / math.ceil(num_steps / len(dataloader))
+            )
 
         for batch in dataloader:
             lr_scheduler_lora.step()
@@ -654,7 +676,7 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
-                optimized_embeddings = text_encoder.get_input_embeddings().weight[:, :],
+                optimized_embeddings=text_encoder.get_input_embeddings().weight[:, :],
                 train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
                 mixed_precision=True,
@@ -682,7 +704,6 @@ def perform_tuning(
                     text_encoder.get_input_embeddings().weight[
                         index_no_updates
                     ] = orig_embeds_params[index_no_updates]
-
 
             global_step += 1
 
@@ -764,6 +785,7 @@ def perform_tuning(
         target_replace_module_text=lora_clip_target_modules,
         target_replace_module_unet=lora_unet_target_modules,
     )
+
 
 def train(
     instance_data_dir: str,
@@ -963,8 +985,9 @@ def train(
         vae = None
 
     # STEP 1 : Perform Inversion
-    if perform_inversion and not cached_latents:
-        preview_training_batch(train_dataloader, "inversion")
+    if perform_inversion:
+        if not cached_latents:
+            preview_training_batch(train_dataloader, "inversion")
 
         print("PTI : Performing Inversion")
         ti_optimizer = optim.AdamW(
@@ -976,7 +999,12 @@ def train(
         )
 
         token_ids_positions_to_update = np.where(index_no_updates.cpu().numpy() == 0)
-        print("Training embedding of size", text_encoder.get_input_embeddings().weight[token_ids_positions_to_update].shape)
+        print(
+            "Training embedding of size",
+            text_encoder.get_input_embeddings()
+            .weight[token_ids_positions_to_update]
+            .shape,
+        )
 
         lr_scheduler = get_scheduler(
             lr_scheduler,
@@ -1098,7 +1126,7 @@ def train(
         num_warmup_steps=lr_warmup_steps_lora,
         num_training_steps=max_train_steps_tuning,
     )
-    if not cached_latents: 
+    if not cached_latents:
         preview_training_batch(train_dataloader, "tuning")
 
     perform_tuning(
@@ -1107,7 +1135,7 @@ def train(
         text_encoder,
         train_dataloader,
         max_train_steps_tuning,
-        index_no_updates = index_no_updates,
+        index_no_updates=index_no_updates,
         cached_latents=cached_latents,
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
@@ -1135,10 +1163,12 @@ def train(
 
     # Save the args_dict to the output directory as a json file:
     with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
-        json.dump(args_dict, f, default=lambda o: '<not serializable>', indent=2)
+        json.dump(args_dict, f, default=lambda o: "<not serializable>", indent=2)
+
 
 def main():
     fire.Fire(train)
+
 
 if __name__ == "__main__":
     main()
