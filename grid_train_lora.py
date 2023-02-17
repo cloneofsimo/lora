@@ -3,7 +3,7 @@ import os
 import random
 import time
 
-def run_lora_experiment(param_grid, n=1000, test = 0, dirname = "lora_grid_search_02_xander", seed = None):
+def run_lora_experiment(param_grid, n=1000, test = 0, dirname = "grid_search_results", seed = None):
   if seed is not None:
       random.seed(seed)
   else:
@@ -68,22 +68,6 @@ def run_lora_experiment(param_grid, n=1000, test = 0, dirname = "lora_grid_searc
     if not test:
       os.system(full_cmd)
 
-
-"""
-
-export CUDA_VISIBLE_DEVICES=3
-conda activate diffusers
-cd /home/xander/Projects/cog/lora
-python grid_train_lora.py
-
-
-'instance_data_dir':             "/home/xander/Pictures/Mars2023/people/gene/train",
-'instance_data_dir':             "/home/xander/Pictures/Mars2023/people/gene/train_one",
-'instance_data_dir':             "/home/xander/Pictures/Mars2023/people/niko/train",
-'instance_data_dir':             "/home/xander/Pictures/Mars2023/people/gene/train",
-
-
-"""
 
 n_to_run = 50
 
