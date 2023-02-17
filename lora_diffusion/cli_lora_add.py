@@ -1,4 +1,9 @@
-from typing import Literal, Union, Dict
+import sys
+if sys.version_info >= (3,8):
+    from typing import Literal
+else : 
+    from typing_extensions import Literal
+from typing import Union, Dict
 import os
 import shutil
 import fire
