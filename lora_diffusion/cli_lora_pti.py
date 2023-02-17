@@ -96,7 +96,7 @@ def compute_pairwise_distances(x,y):
     return torch.pow(x - y, 2).sum(2)
 
 
-def print_most_similar_tokens(tokenizer, optimized_token, text_encoder, n=10):
+def print_most_similar_tokens(tokenizer, optimized_token, text_encoder, n=5):
     with torch.no_grad():
         # get all the token embeddings:
         token_embeds = text_encoder.get_input_embeddings().weight.data
@@ -334,6 +334,24 @@ def inpainting_dataloader(
 
     return train_dataloader
 
+def get_lora_norm(model):
+    norm, n_elements = 0, 0
+
+    for name, _module in model.named_modules():
+        if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
+            # get the up and down weight matrices:
+            ups = _module.lora_up.weight.data
+            downs = _module.lora_down.weight.data
+            
+            # flatten and compute dot product:
+            wght = (ups.flatten(1) @ downs.flatten(1)).flatten()
+
+            # add to the total norm:
+            norm += wght.abs().sum()
+            n_elements += wght.shape[0]
+
+    return norm / n_elements
+
 
 def loss_step(
     batch,
@@ -451,6 +469,15 @@ def loss_step(
         target_norm = 0.39
         embedding_norm_loss = (embedding_norm - target_norm)**2
         loss += 0.005*embedding_norm_loss
+
+    if 0: #disable norm regularization for now
+        unet_norm = get_lora_norm(unet)
+        text_encoder_norm = get_lora_norm(text_encoder)
+        print(f"text_encoder norm: {text_encoder_norm.item():.6f}, unet_norm: {unet_norm.item():.6f}", )
+        norm_loss = 0.5 * unet_norm + 0.5 * text_encoder_norm
+        norm_loss_f = 0.0
+        print(f"loss: {loss.item():.6f}, norm_loss: {norm_loss.item():.6f}, norm_loss_f = {norm_loss_f:.1f}")
+        loss += norm_loss_f * norm_loss
 
     return loss
 
@@ -763,7 +790,7 @@ def perform_tuning(
                     .mean()
                     .item()
                 )
-                print("LORA Unet Moved", moved)
+                print(f"LORA Unet Moved {moved:.6f}")
 
                 moved = (
                     torch.tensor(
@@ -772,7 +799,7 @@ def perform_tuning(
                     .mean()
                     .item()
                 )
-                print("LORA CLIP Moved", moved)
+                print(f"LORA CLIP Moved {moved:.6f}")
 
                 if log_wandb:
                     with torch.no_grad():
@@ -845,7 +872,8 @@ def train(
     save_steps: int = 100,
     gradient_accumulation_steps: int = 4,
     gradient_checkpointing: bool = False,
-    lora_rank: int = 4,
+    lora_rank_unet: int = 4,
+    lora_rank_text_encoder: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
     lora_dropout_p: float = 0.0,
@@ -881,9 +909,6 @@ def train(
 ):
     script_start_time = time.time()
     torch.manual_seed(seed)
-
-    lora_rank_unet = lora_rank
-    lora_rank_text_encoder = lora_rank
 
     if use_template == "person" and not use_face_segmentation_condition:
         print("###  WARNING  ### : Using person template without face segmentation condition")
@@ -1079,7 +1104,7 @@ def train(
 
     elif load_pretrained_inversion_embeddings_path is not None:
 
-        print("PTI : Loading pretrained inversion embeddings..")
+        print(f"PTI : Loading pretrained inversion embeddings from {load_pretrained_inversion_embeddings_path}...")
         from safetensors.torch import safe_open
         # Load the pretrained embeddings from the lora file:
         safeloras = safe_open(load_pretrained_inversion_embeddings_path, framework="pt", device="cpu")
@@ -1176,17 +1201,17 @@ def train(
     print(f"PTI : has {len(unet_lora_params)} lora")
     print("PTI : Before training:")
 
-    moved = (
+    unet_moved = (
         torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
         .mean().item())
-    print(f"LORA Unet Moved {moved:.6f}")
+    print(f"LORA Unet Moved {unet_moved:.6f}")
 
 
-    moved = (
+    clip_moved = (
         torch.tensor(
             list(itertools.chain(*inspect_lora(text_encoder).values()))
         ).mean().item())
-    print(f"LORA CLIP Moved {moved:.6f}")
+    print(f"LORA CLIP Moved {clip_moved:.6f}")
 
     perform_tuning(
         unet,
@@ -1215,11 +1240,25 @@ def train(
         train_inpainting=train_inpainting,
     )
 
+    unet_moved = (
+        torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
+        .mean().item())
+    print(f"LORA Unet Moved {unet_moved:.6f}")
+
+    clip_moved = (
+        torch.tensor(
+            list(itertools.chain(*inspect_lora(text_encoder).values()))
+        ).mean().item())
+    print(f"LORA CLIP Moved {clip_moved:.6f}")
+
+
     print("###############  Tuning Done  ###############")
     training_time = time.time() - script_start_time
     print(f"Training time: {training_time/60:.1f} minutes")
     args_dict["training_time_s"] = int(training_time)
     args_dict["n_epochs"] = math.ceil(max_train_steps_tuning / len(train_dataloader))
+    args_dict["unet_moved"] = unet_moved
+    args_dict["clip_moved"] = clip_moved
 
     # Save the args_dict to the output directory as a json file:
     with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
