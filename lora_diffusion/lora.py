@@ -1,7 +1,12 @@
 import json
 import math
 from itertools import groupby
-from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
+import sys
+if sys.version_info >= (3,9):
+    from typing import Type
+else : 
+    from typing_extensions import Type
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import PIL
@@ -914,7 +919,7 @@ def apply_learned_embed_in_clip(
         trained_tokens = list(learned_embeds.keys())
 
     for token in trained_tokens:
-        print(token)
+        print("Adding new token: ", token)
         embeds = learned_embeds[token]
 
         # cast to dtype of text_encoder
