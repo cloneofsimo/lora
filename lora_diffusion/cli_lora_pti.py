@@ -845,7 +845,8 @@ def train(
     save_steps: int = 100,
     gradient_accumulation_steps: int = 4,
     gradient_checkpointing: bool = False,
-    lora_rank: int = 4,
+    lora_rank_unet: int = 4,
+    lora_rank_text_encoder: int = 4,
     lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
     lora_clip_target_modules={"CLIPAttention"},
     lora_dropout_p: float = 0.0,
@@ -881,9 +882,6 @@ def train(
 ):
     script_start_time = time.time()
     torch.manual_seed(seed)
-
-    lora_rank_unet = lora_rank
-    lora_rank_text_encoder = lora_rank
 
     if use_template == "person" and not use_face_segmentation_condition:
         print("###  WARNING  ### : Using person template without face segmentation condition")
@@ -1219,7 +1217,8 @@ def train(
     training_time = time.time() - script_start_time
     print(f"Training time: {training_time/60:.1f} minutes")
     args_dict["training_time_s"] = int(training_time)
-    args_dict["n_epochs"] = math.ceil(max_train_steps_tuning / len(train_dataloader))
+    args_dict["n_epochs"] = math.ceil(max_train_steps_tuning / len(train_dataloader.dataset))
+    args_dict["n_training_imgs"] = len(train_dataloader.dataset)
 
     # Save the args_dict to the output directory as a json file:
     with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
