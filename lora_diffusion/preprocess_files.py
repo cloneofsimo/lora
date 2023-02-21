@@ -249,7 +249,7 @@ def _center_of_mass(mask: Image.Image):
 def load_and_save_masks_and_captions(
     files: Union[str, List[str]],
     output_dir: str,
-    caption_text: Optional[str] = None,
+    captions_text: Optional[Union[List[str], str]] = None,
     target_prompts: Optional[Union[List[str], str]] = None,
     target_size: int = 512,
     crop_based_on_salience: bool = True,
@@ -268,8 +268,10 @@ def load_and_save_masks_and_captions(
         # check if it is a directory
         if os.path.isdir(files):
             # get all the .png .jpg in the directory
-            files = glob.glob(os.path.join(files, "*.png")) + glob.glob(
-                os.path.join(files, "*.jpg")
+            files = (
+                glob.glob(os.path.join(files, "*.png"))
+                + glob.glob(os.path.join(files, "*.jpg"))
+                + glob.glob(os.path.join(files, "*.jpeg"))
             )
 
         if len(files) == 0:
@@ -283,8 +285,10 @@ def load_and_save_masks_and_captions(
     images = [Image.open(file) for file in files]
 
     # captions
-    print(f"Generating {len(images)} captions...")
-    captions = blip_captioning_dataset(images, text=caption_text)
+    captions = caption_text
+    if not isinstance(caption_text, List):
+        print(f"Generating {len(images)} captions...")
+        captions = blip_captioning_dataset(images, text=caption_text)
 
     if target_prompts is None:
         target_prompts = captions
@@ -330,3 +334,7 @@ def load_and_save_masks_and_captions(
 
 def main():
     fire.Fire(load_and_save_masks_and_captions)
+
+
+if __name__ == "__main__":
+    main()

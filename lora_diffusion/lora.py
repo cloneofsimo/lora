@@ -919,7 +919,7 @@ def apply_learned_embed_in_clip(
         trained_tokens = list(learned_embeds.keys())
 
     for token in trained_tokens:
-        print(token)
+        print("Adding new token: ", token)
         embeds = learned_embeds[token]
 
         # cast to dtype of text_encoder
