@@ -2,7 +2,12 @@
 # Have BLIP auto caption
 # Have CLIPSeg auto mask concept
 
-from typing import List, Literal, Union, Optional, Tuple
+import sys
+if sys.version_info >= (3,8):
+    from typing import Literal
+else : 
+    from typing_extensions import Literal
+from typing import List, Union, Optional, Tuple
 import os
 from PIL import Image, ImageFilter
 import torch

@@ -1,7 +1,12 @@
 import json
 import math
 from itertools import groupby
-from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
+import sys
+if sys.version_info >= (3,9):
+    from typing import Type
+else : 
+    from typing_extensions import Type
+from typing import Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import PIL

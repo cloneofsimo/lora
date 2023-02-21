@@ -1,12 +1,10 @@
 # Bootstrapped from:
 # https://github.com/huggingface/diffusers/blob/main/examples/dreambooth/train_dreambooth.py
 
-import argparse
-import hashlib
-import inspect
 import itertools
 import math
 import os
+
 import json
 import time
 import random
@@ -34,6 +32,14 @@ from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 import wandb
 import fire
+
+import sys
+if sys.version_info >= (3,8):
+    from typing import Literal
+else : 
+    from typing_extensions import Literal
+
+from typing import Optional, List
 
 from lora_diffusion import (
     PivotalTuningDatasetCapation,

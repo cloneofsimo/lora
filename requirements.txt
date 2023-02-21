@@ -8,3 +8,4 @@ safetensors
 opencv-python
 torchvision
 mediapipe
+typing_extensions; python_version < '3.9'
