@@ -4,6 +4,7 @@ from itertools import groupby
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import numpy as np
+import random
 import PIL
 import torch
 import torch.nn as nn
@@ -801,7 +802,7 @@ def monkeypatch_or_replace_safeloras(models, safeloras):
 
     for name, (lora, ranks, target) in loras.items():
         model = getattr(models, name, None)
-
+        
         if not model:
             print(f"No model provided for {name}, contained in Lora")
             continue
@@ -914,7 +915,7 @@ def apply_learned_embed_in_clip(
         trained_tokens = list(learned_embeds.keys())
 
     for token in trained_tokens:
-        print(token)
+        print("Adding new token: ", token)
         embeds = learned_embeds[token]
 
         # cast to dtype of text_encoder
@@ -1028,17 +1029,19 @@ def inspect_lora(model):
 
     for name, _module in model.named_modules():
         if _module.__class__.__name__ in ["LoraInjectedLinear", "LoraInjectedConv2d"]:
+            # get the up and down weight matrices:
             ups = _module.lora_up.weight.data.clone()
             downs = _module.lora_down.weight.data.clone()
-
+            
+            # flatten and compute dot product:
             wght: torch.Tensor = ups.flatten(1) @ downs.flatten(1)
-
+            # get the mean of the absolute value of the dot product:
             dist = wght.flatten().abs().mean().item()
+
             if name in moved:
                 moved[name].append(dist)
             else:
                 moved[name] = [dist]
-
     return moved
 
 

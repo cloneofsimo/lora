@@ -1,7 +1,7 @@
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-
+import numpy as np
 from PIL import Image
 from torch import zeros_like
 from torch.utils.data import Dataset
@@ -39,7 +39,40 @@ OBJECT_TEMPLATE = [
     "a photo of a small {}",
 ]
 
-STYLE_TEMPLATE = [
+PERSON_TEMPLATE = [
+    "{}",
+    "{}",
+    "a picture of {}",
+    "a closeup of {}",
+    "a closeup of {}'s face",
+    "a closeup photo of {}",
+    "a close-up picture of {}",
+    "a photo of {}",
+    "a photo of {}",
+    "the photo of {}",
+    "a cropped photo of {}",
+    "a funny photo of {}",
+    "a selfie of {}",
+    "a photo of the handsome {}",
+    "a photo of the beautiful {}",
+    "a selfie taken by the handsome {}",
+    "a selfie taken by {}",
+    "{} taking a selfie",
+    "{} is having fun, 4k photograph",
+    "{} wearing a plaidered shirt standing next to another person",
+    "smiling {} in a hoodie and sweater",
+    "{} smiling at the camera",
+    "a photo of the cool {}",
+    "a close-up photo of {}",
+    "a bright photo of {}",
+    "a cropped photo of {}",
+    "a brilliant HD photo of {}",
+    "a beautiful picture of {}",
+    "a photo showing {}",
+    "a great photo of {}",
+]
+
+STYLE_TEMPLATE_ORIG = [
     "a painting in the style of {}",
     "a rendering in the style of {}",
     "a cropped painting in the style of {}",
@@ -61,10 +94,28 @@ STYLE_TEMPLATE = [
     "a large painting in the style of {}",
 ]
 
+STYLE_TEMPLATE = [
+    "a painting in the style of {}",
+    "a rendering in the style of {}",
+    "an artwork in the style of {}",
+    "a magnificent painting in the style of {}",
+    "a picture in the style of {}",
+    "a photograph, {} style",
+    "{} style painting",
+    "a {}-styled artwork",
+    "a nice painting in the style of {}",
+    "a goregous example of {} style",
+    "image in the style of {}",
+    "{}, painting",
+    "{} artwork"
+]
+
+
 NULL_TEMPLATE = ["{}"]
 
 TEMPLATE_MAP = {
     "object": OBJECT_TEMPLATE,
+    "person": PERSON_TEMPLATE,
     "style": STYLE_TEMPLATE,
     "null": NULL_TEMPLATE,
 }
@@ -116,6 +167,28 @@ def _generate_random_mask(image):
     return mask, masked_image
 
 
+def expand_rectangle(mask, f):
+    rows, cols = np.where(mask == 255)
+    top_row, bottom_row = np.min(rows), np.max(rows)
+    left_col, right_col = np.min(cols), np.max(cols)
+    
+    rect_height, rect_width = bottom_row - top_row + 1, right_col - left_col + 1
+    new_height, new_width = np.round(rect_height * f), np.round(rect_width * f)
+    
+    center_row, center_col = top_row + rect_height // 2, left_col + rect_width // 2
+    top_row, bottom_row = np.round(center_row - new_height / 2), np.round(center_row + new_height / 2)
+    left_col, right_col = np.round(center_col - new_width / 2), np.round(center_col + new_width / 2)
+    
+    top_row, bottom_row = int(np.clip(top_row, 0, mask.shape[0] - 1)), int(np.clip(bottom_row, 0, mask.shape[0] - 1))
+    left_col, right_col = int(np.clip(left_col, 0, mask.shape[1] - 1)), int(np.clip(right_col, 0, mask.shape[1] - 1))
+    
+    expanded_mask = np.ones_like(mask)
+    expanded_mask[top_row:bottom_row + 1, left_col:right_col + 1] = 255
+    
+    return expanded_mask
+
+
+
 class PivotalTuningDatasetCapation(Dataset):
     """
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
@@ -134,13 +207,14 @@ class PivotalTuningDatasetCapation(Dataset):
         resize=True,
         use_mask_captioned_data=False,
         use_face_segmentation_condition=False,
-        train_inpainting=False,
-        blur_amount: int = 70,
+        train_inpainting=False
     ):
         self.size = size
         self.tokenizer = tokenizer
         self.resize = resize
         self.train_inpainting = train_inpainting
+        self.h_flip_prob = 0.5
+        self.final_flip_prob = 0.33 if use_template == 'person' else 0.5
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -156,6 +230,8 @@ class PivotalTuningDatasetCapation(Dataset):
         # Prepare the instance images
         if use_mask_captioned_data:
             src_imgs = glob.glob(str(instance_data_root) + "/*src.jpg")
+            src_imgs = sorted(src_imgs, key=lambda x: int(str(Path(x).stem).split(".")[0]))
+
             for f in src_imgs:
                 idx = int(str(Path(f).stem).split(".")[0])
                 mask_path = f"{instance_data_root}/{idx}.mask.png"
@@ -218,6 +294,18 @@ class PivotalTuningDatasetCapation(Dataset):
                         ]
                     )
                     for idx, mask in enumerate(masks):
+                        avg_pixel_value = np.array(mask.getdata()).mean()
+                        if avg_pixel_value == 1.0:
+                            print(f"No mask detected for {idx}..")
+                        else:
+                            if 1:
+                                # convert to numpy array:
+                                mask = np.array(mask)
+                                # Make the rectangular mask region bigger:
+                                mask = expand_rectangle(mask, 1.25)
+                                # convert back to PIL image:
+                                mask = Image.fromarray(mask)
+
                         mask.save(f"{instance_data_root}/{idx}.mask.png")
 
                     break
@@ -237,12 +325,13 @@ class PivotalTuningDatasetCapation(Dataset):
         self.h_flip = h_flip
         self.image_transforms = transforms.Compose(
             [
+                transforms.RandomAffine(degrees=0, translate=(0, 0), scale=(1.0, 1.2)),
                 transforms.Resize(
                     size, interpolation=transforms.InterpolationMode.BILINEAR
                 )
                 if resize
                 else transforms.Lambda(lambda x: x),
-                transforms.ColorJitter(0.1, 0.1)
+                transforms.ColorJitter(0.1, 0.1, 0.02, 0.02)
                 if color_jitter
                 else transforms.Lambda(lambda x: x),
                 transforms.CenterCrop(size),
@@ -251,7 +340,13 @@ class PivotalTuningDatasetCapation(Dataset):
             ]
         )
 
-        self.blur_amount = blur_amount
+        print("Captions:")
+        print(self.captions)
+
+    def tune_h_flip_prob(self, training_progress):
+        if self.h_flip:
+            # Tune the h_flip probability to be 0.5 training_progress is 0 and end_prob when training_progress is 1
+            self.h_flip_prob = 0.5 + (self.final_flip_prob - 0.5) * training_progress
 
     def __len__(self):
         return self._length
@@ -283,18 +378,14 @@ class PivotalTuningDatasetCapation(Dataset):
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
 
-        print(text)
+        if random.random() < 0.1:
+            print(text)
 
         if self.use_mask:
-            example["mask"] = (
-                self.image_transforms(
-                    Image.open(self.mask_path[index % self.num_instance_images])
-                )
-                * 0.5
-                + 1.0
-            )
+            img_mask = Image.open(self.mask_path[index % self.num_instance_images])
+            example["mask"] = (self.image_transforms(img_mask)* 0.5 + 1.0)
 
-        if self.h_flip and random.random() > 0.5:
+        if self.h_flip and random.random() < self.h_flip_prob:
             hflip = transforms.RandomHorizontalFlip(p=1)
 
             example["instance_images"] = hflip(example["instance_images"])
