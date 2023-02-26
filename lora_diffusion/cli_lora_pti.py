@@ -107,7 +107,7 @@ def print_most_similar_tokens(tokenizer, optimized_token, text_encoder, n=10):
 
         distances = compute_pairwise_distances(optimized_token.unsqueeze(0), token_embeds).squeeze()
         distances = distances.detach().cpu().numpy()
-
+        
         # print similarity for the most similar tokens:
         most_similar_tokens = np.argsort(similarity)[::-1]
 
@@ -187,11 +187,13 @@ def get_models(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
         subfolder=None if pretrained_vae_name_or_path else "vae",
         revision=None if pretrained_vae_name_or_path else revision,
+        local_files_only = True,
     )
     unet = UNet2DConditionModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="unet",
         revision=revision,
+        local_files_only = True,
     )
 
     return (
@@ -199,7 +201,7 @@ def get_models(
         vae.to(device),
         unet.to(device),
         tokenizer,
-        placeholder_token_ids,
+        placeholder_token_ids
     )
 
 
@@ -949,7 +951,8 @@ def train(
     )
 
     noise_scheduler = DDPMScheduler.from_config(
-        pretrained_model_name_or_path, subfolder="scheduler"
+        pretrained_model_name_or_path, subfolder="scheduler", 
+        local_files_only = True,
     )
 
     if gradient_checkpointing:

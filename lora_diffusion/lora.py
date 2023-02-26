@@ -535,7 +535,6 @@ def convert_loras_to_safeloras(
 ):
     convert_loras_to_safeloras_with_embeds(modelmap=modelmap, outpath=outpath)
 
-
 def parse_safeloras(
     safeloras,
 ) -> Dict[str, Tuple[List[nn.parameter.Parameter], List[int], List[str]]]:
@@ -591,6 +590,55 @@ def parse_safeloras(
             # Insert the weight into the list
             idx = idx * 2 + (1 if direction == "down" else 0)
             weights[idx] = nn.parameter.Parameter(safeloras.get_tensor(key))
+
+        loras[name] = (weights, ranks, target)
+
+    return loras
+
+
+def dict_to_lora(tensor_dict, metadata):
+    """
+    Converts a dictionary of tensors + metadata into a Lora
+    """
+    loras = {}
+
+    get_name = lambda k: k.split(":")[0]
+
+    keys = list(tensor_dict.keys())
+    keys.sort(key=get_name)
+
+    for name, module_keys in groupby(keys, get_name):
+        info = metadata.get(name)
+
+        if not info:
+            raise ValueError(
+                f"Tensor {name} has no metadata - is this a Lora safetensor?"
+            )
+
+        # Skip Textual Inversion embeds
+        if info == EMBED_FLAG:
+            continue
+
+        # Handle Loras
+        # Extract the targets
+        target = json.loads(info)
+
+        # Build the result lists - Python needs us to preallocate lists to insert into them
+        module_keys = list(module_keys)
+        ranks = [4] * (len(module_keys) // 2)
+        weights = [None] * len(module_keys)
+
+        for key in module_keys:
+            # Split the model name and index out of the key
+            _, idx, direction = key.split(":")
+            idx = int(idx)
+
+            # Add the rank
+            ranks[idx] = int(metadata[f"{name}:{idx}:rank"])
+
+            # Insert the weight into the list
+            idx = idx * 2 + (1 if direction == "down" else 0)
+            weights[idx] = nn.parameter.Parameter(tensor_dict[key])
 
         loras[name] = (weights, ranks, target)
 

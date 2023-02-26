@@ -313,6 +313,11 @@ class PivotalTuningDatasetCapation(Dataset):
             for idx in range(len(self.instance_images_path)):
                 self.mask_path.append(f"{instance_data_root}/{idx}.mask.png")
 
+        # Final important variables for this dataset:
+        # self.instance_images_path
+        # self.mask_path
+        # self.captions
+
         self.num_instance_images = len(self.instance_images_path)
         self.token_map = token_map
 
