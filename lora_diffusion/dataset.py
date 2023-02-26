@@ -345,6 +345,13 @@ class PivotalTuningDatasetCapation(Dataset):
             ]
         )
 
+        self.instance_images = []
+
+        if len(self.instance_images_path) < 20:
+            # Load all the images into memory:
+            for f in self.instance_images_path:
+                self.instance_images.append(Image.open(f).convert("RGB"))
+
         print("Captions:")
         print(self.captions)
 
@@ -358,11 +365,14 @@ class PivotalTuningDatasetCapation(Dataset):
 
     def __getitem__(self, index):
         example = {}
-        instance_image = Image.open(
-            self.instance_images_path[index % self.num_instance_images]
-        )
-        if not instance_image.mode == "RGB":
-            instance_image = instance_image.convert("RGB")
+
+        if len(self.instance_images) > 0:
+            instance_image = self.instance_images[index % self.num_instance_images]
+        else:
+            instance_image = Image.open(
+                self.instance_images_path[index % self.num_instance_images]
+            ).convert("RGB")
+
         example["instance_images"] = self.image_transforms(instance_image)
 
         if self.train_inpainting:
