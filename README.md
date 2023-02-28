@@ -34,7 +34,7 @@
 
 ## Main Features
 
-- Fine-tune Stable diffusion models twice as fast than dreambooth method, by Low-rank Adaptation
+- Fine-tune Stable diffusion models twice as fast than Dreambooth method, by Low-rank Adaptation
 - Get insanely small end result (1MB ~ 6MB), easy to share and download.
 - Compatible with `diffusers`
 - Support for inpainting
@@ -74,7 +74,7 @@
 - Mask conditioned score estimation loss
 - safetensor support, xformers support (thanks to @[hafriedlander](https://github.com/hafriedlander))
 - Distill fully trained model to LoRA with SVD distillation CLI
-- Flexiable dataset support
+- Flexible dataset support
 
 ### 2022/12/22
 
@@ -105,9 +105,9 @@ $$
 Where we can further decompose $\Delta W$ into low-rank matrices : $\Delta W = A B^T $, where $A, \in \mathbb{R}^{n \times d}, B \in \mathbb{R}^{m \times d}, d << n$.
 This is the key idea of LoRA. We can then fine-tune $A$ and $B$ instead of $W$. In the end, you get an insanely small model as $A$ and $B$ are much smaller than $W$.
 
-Also, not all of the parameters need tuning: they found that often, $Q, K, V, O$ (i.e., attention layer) of the transformer model is enough to tune. (This is also the reason why the end result is so small). This repo will follow the same idea.
+Also, not all of the parameters need tuning: they found that often, $Q, K, V, O$ (i.e., attention layer) of the transformer model is enough to tune (This is also the reason why the end result is so small). This repo will follow the same idea.
 
-Now, how would we actually use this to update diffusion model? First, we will use Stable-diffusion from [stability-ai](https://stability.ai/). Their model is nicely ported through Huggingface API, so this repo has built various fine-tuning methods around them. In detail, there are three subtle but important distictions in methods to make this work out.
+Now, how would we actually use this to update diffusion model? First, we will use Stable-diffusion from [stability-ai](https://stability.ai/). Their model is nicely ported through Huggingface API, so this repo has built various fine-tuning methods around them. In detail, there are three subtle but important distinctions in methods to make this work out.
 
 1. [Dreambooth](https://arxiv.org/abs/2208.12242)
 
@@ -134,7 +134,7 @@ pip install git+https://github.com/cloneofsimo/lora.git
 
 ## 1. Fine-tuning Stable diffusion with LoRA CLI
 
-If you have over 12 GB of memory, it is recommended to use Pivotal Tuning Inversion CLI provided with lora implementation. They have the best performance, and will be updated many times in the future as well. These are the parameters that worked for various dataset. _ALL OF THE EXAMPLE ABOVE WERE TRAINED WITH BELOW PARAMETERS_
+If you have over 12 GB of memory, it is recommended to use Pivotal Tuning Inversion CLI provided with LoRA implementation. They have the best performance, and will be updated many times in the future as well. These are the parameters that worked for various datasets. _ALL OF THE EXAMPLES ABOVE WERE TRAINED WITH BELOW PARAMETERS_
 
 ```bash
 export MODEL_NAME="runwayml/stable-diffusion-v1-5"
@@ -176,7 +176,7 @@ lora_pti \
 
 ## 2. Other Options
 
-Basic usage is as follows: prepare sets of $A, B$ matrices in an unet model, and fine-tune them.
+Basic usage is as follows: prepare sets of $A, B$ matrices in an U-Net model, and fine-tune them.
 
 ```python
 from lora_diffusion import inject_trainable_lora, extract_lora_ups_down
@@ -201,19 +201,19 @@ Another example of this, applied on [Dreambooth](https://arxiv.org/abs/2208.1224
 training_scripts/run_lora_db.sh
 ```
 
-Another dreambooth example, with text_encoder training on can be run with:
+Another Dreambooth example, with text_encoder training on can be run with:
 
 ```bash
 training_scripts/run_lora_db_w_text.sh
 ```
 
-## Loading, merging, and interpolating trained LORAs with CLIs.
+## Loading, merging, and interpolating trained LoRAs with CLIs
 
 We've seen that people have been merging different checkpoints with different ratios, and this seems to be very useful to the community. LoRA is extremely easy to merge.
 
 By the nature of LoRA, one can interpolate between different fine-tuned models by adding different $A, B$ matrices.
 
-Currently, LoRA cli has three options : merge full model with LoRA, merge LoRA with LoRA, or merge full model with LoRA and changes to `ckpt` format (original format)
+Currently, LoRA CLI has three options: merge full model with LoRA, merge LoRA with LoRA, or merge full model with LoRA and changes to `ckpt` format (original format)
 
 ```
 SYNOPSIS
@@ -245,7 +245,7 @@ FLAGS
 $ lora_add PATH_TO_DIFFUSER_FORMAT_MODEL PATH_TO_LORA.safetensors OUTPUT_PATH ALPHA --mode upl
 ```
 
-`path_1` can be both local path or huggingface model name. When adding LoRA to unet, alpha is the constant as below:
+`path_1` can be both local path or huggingface model name. When adding LoRA to U-Net, alpha is the constant as below:
 
 $$
 W' = W + \alpha \Delta W
@@ -259,7 +259,7 @@ So, set alpha to 1.0 to fully add LoRA. If the LoRA seems to have too much effec
 $ lora_add runwayml/stable-diffusion-v1-5 ./example_loras/lora_krk.safetensors ./output_merged 0.8 --mode upl
 ```
 
-### Mergigng Full model with LoRA and changing to original CKPT format
+### Merging Full model with LoRA and changing to original CKPT format
 
 Everything same as above, but with mode `upl-ckpt-v2` instead of `upl`.
 
@@ -273,7 +273,7 @@ $ lora_add runwayml/stable-diffusion-v1-5 ./example_loras/lora_krk.safetensors .
 $ lora_add PATH_TO_LORA1.safetensors PATH_TO_LORA2.safetensors OUTPUT_PATH.safetensors ALPHA_1 ALPHA_2
 ```
 
-alpha is the ratio of the first model to the second model. i.e.,
+Alpha is the ratio of the first model to the second model, i.e.,
 
 $$
 \Delta W = (\alpha_1 A_1 + \alpha_2 A_2) (\alpha_1 B_1 + \alpha_2 B_2)^T
@@ -295,9 +295,9 @@ Checkout `scripts/run_inference.ipynb` for an example of how to make inference w
 
 Checkout `scripts/run_img2img.ipynb` for an example of how to make inference with LoRA.
 
-### Merging Lora with Lora, and making inference dynamically using `monkeypatch_add_lora`.
+### Merging LoRA with LoRA, and making inference dynamically using `monkeypatch_add_lora`.
 
-Checkout `scripts/merge_lora_with_lora.ipynb` for an example of how to merge Lora with Lora, and make inference dynamically using `monkeypatch_add_lora`.
+Checkout `scripts/merge_lora_with_lora.ipynb` for an example of how to merge LoRA with LoRA, and make inference dynamically using `monkeypatch_add_lora`.
 
 <!-- #region -->
 <p align="center">
@@ -332,8 +332,8 @@ I'm curating a list of tips and discussions here. Feel free to add your own tips
 
 ### **How long should you train?**
 
-Effect of fine tuning (both Unet + CLIP) can be seen in the following image, where each image is another 500 steps.
-Trained with 9 images, with lr of `1e-4` for unet, and `5e-5` for CLIP. (You can adjust this with `--learning_rate=1e-4` and `--learning_rate_text=5e-5`)
+Effect of fine tuning (both U-Net + CLIP) can be seen in the following image, where each image is another 500 steps.
+Trained with 9 images, with lr of `1e-4` for U-Net, and `5e-5` for CLIP (You can adjust this with `--learning_rate=1e-4` and `--learning_rate_text=5e-5`).
 
 <!-- #region -->
 <p align="center">
@@ -347,11 +347,11 @@ You can see that with 2500 steps, you already get somewhat good results.
 
 ### **What is a good learning rate for LoRA?**
 
-People using dreambooth are used to using lr around `1e-6`, but this is way too small for training LoRAs. **I've tried using 1e-4, and it is OK**. I think these values should be more explored statistically.
+People using Dreambooth are used to using lr around `1e-6`, but this is way too small for training LoRAs. **I've tried using 1e-4, and it is OK**. I think these values should be more explored statistically.
 
-### **What happens to Text Encoder LoRA and Unet LoRA?**
+### **What happens to Text Encoder LoRA and U-Net LoRA?**
 
-Let's see: the following is only using Unet LoRA:
+Let's see: the following is only using U-Net LoRA:
 
 <!-- #region -->
 <p align="center">
@@ -369,7 +369,7 @@ And the following is only using Text Encoder LoRA:
 
 So they learnt different aspect of the dataset, but they are not mutually exclusive. You can use both of them to get better results, and tune them seperately to get even better results.
 
-With LoRA Text Encoder, Unet, all the schedulers, guidance scale, negative prompt etc. etc., you have so much to play around with to get the best result you want. For example, with $\alpha_{unet} = 0.6$, $\alpha_{text} = 0.9$, you get a better result compared to $\alpha_{unet} = 1.0$, $\alpha_{text} = 1.0$ (default). Checkout below:
+With LoRA Text Encoder, U-Net, all the schedulers, guidance scale, negative prompt etc. etc., you have so much to play around with to get the best result you want. For example, with $\alpha_{unet} = 0.6$, $\alpha_{text} = 0.9$, you get a better result compared to $\alpha_{unet} = 1.0$, $\alpha_{text} = 1.0$ (default). Checkout below:
 
 <!-- #region -->
 <p align="center">
