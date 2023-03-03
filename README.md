@@ -49,6 +49,28 @@
 
 - Easy [colab running example](https://colab.research.google.com/drive/1iSFDpRBKEWr2HLlz243rbym3J2X95kcy?usp=sharing) of Dreambooth by @pedrogengo
 
+- Run the model in your browser or as an API on Replicate: [replicate.com/cloneofsimo/lora](https://replicate.com/cloneofsimo/lora)
+
+## API
+
+You can run this model as an [API on Replicate](https://replicate.com/cloneofsimo/lora/api).
+
+Here's a Python example:
+
+```py
+import replicate
+
+model = replicate.models.get("cloneofsimo/lora")
+version = model.versions.get("b42854b40200390a5851913c98e5eccb571cd7e42d4726917429d29c09e9ac16")
+inputs = {
+    'prompt': "a photo of an astronaut riding a horse in the style of <1>",
+    'lora_urls': "https://replicate.delivery/pbxt/S8wVSt0vXr5mEFDjP5XkmMPjLPCaDmv1Rw6AzRMDEhoFqqGE/tmp_fs4evyhbob-ross.safetensors",
+}
+
+output = version.predict(**inputs)
+print(output)
+```
+
 # UPDATES & Notes
 
 ### 2023/02/06
