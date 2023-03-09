@@ -42,23 +42,69 @@ OBJECT_TEMPLATE = [
 STYLE_TEMPLATE = [
     "a painting in the style of {}",
     "a rendering in the style of {}",
-    "a cropped painting in the style of {}",
+    "a good rendering in the style of {}",
     "the painting in the style of {}",
     "a clean painting in the style of {}",
-    "a dirty painting in the style of {}",
-    "a dark painting in the style of {}",
+    "a rendering in the style of {}",
+    "a dark image in the style of {}",
     "a picture in the style of {}",
     "a cool painting in the style of {}",
-    "a close-up painting in the style of {}",
-    "a bright painting in the style of {}",
+    "a close-up picture in the style of {}",
+    "a bright image in the style of {}",
     "a cropped painting in the style of {}",
     "a good painting in the style of {}",
     "a close-up painting in the style of {}",
     "a rendition in the style of {}",
     "a nice painting in the style of {}",
-    "a small painting in the style of {}",
-    "a weird painting in the style of {}",
-    "a large painting in the style of {}",
+    "a small photo in the style of {}",
+    "a weird illustration in the style of {}",
+    "a large picture in the style of {}",
+]
+
+PERSON_TEMPLATE = [
+    "a photo of {}",
+    "a rendering of the person {}",
+    "an image of the person {} face",
+    "the photo of a {}",
+    "a photo of a clean {}",
+    "a dark photo of the {}",
+    "a photo of my {}",
+    "a photo of the cool {}",
+    "a photo of the good person {}",
+    "an attractive image of the person {}",
+    "a close-up photo of {} face",
+    "a bright photo of the {}",
+    "a cropped photo of a {} face",
+    "a good photo of a {}",
+    "a photo of the nice {}",
+    "a photo of the small {}",
+    "a photo of the person {} face",
+    "a photo of the large {} face",
+    "a photo of a cool {}",
+    "a photo of a small {}",
+]
+
+LOCATION_TEMPLATE = [
+    "a photo of the place {}",
+    "a photo of the location {}",
+    "a rendering of a {}",
+    "a cropped photo of the {} location",
+    "the photo of a {}",
+    "a photo of the clean background {}",
+    "a photo of a dirty background {}",
+    "a dark photo of the place {}",
+    "a photo of my place {}",
+    "an early photo of the place {}",
+    "a photo of a favorite place {}",
+    "a photo of the famous location  {}",
+    "a photo of a nice {}",
+    "a good photo of a {}",
+    "a photo of the nice {}",
+    "a photo of the small {}",
+    "a photo of the weird {}",
+    "a photo of the large {}",
+    "a photo of a cool {}",
+    "a photo of a small {}",
 ]
 
 NULL_TEMPLATE = ["{}"]
@@ -66,6 +112,8 @@ NULL_TEMPLATE = ["{}"]
 TEMPLATE_MAP = {
     "object": OBJECT_TEMPLATE,
     "style": STYLE_TEMPLATE,
+    "location": LOCATION_TEMPLATE,
+    "face": PERSON_TEMPLATE,
     "null": NULL_TEMPLATE,
 }
 
@@ -166,7 +214,8 @@ class PivotalTuningDatasetCapation(Dataset):
                 else:
                     print(f"Mask not found for {f}")
 
-            self.captions = open(f"{instance_data_root}/caption.txt").readlines()
+            self.captions = open(
+                f"{instance_data_root}/caption.txt").readlines()
 
         else:
             possibily_src_images = (
@@ -288,7 +337,8 @@ class PivotalTuningDatasetCapation(Dataset):
         if self.use_mask:
             example["mask"] = (
                 self.image_transforms(
-                    Image.open(self.mask_path[index % self.num_instance_images])
+                    Image.open(self.mask_path[index %
+                               self.num_instance_images])
                 )
                 * 0.5
                 + 1.0

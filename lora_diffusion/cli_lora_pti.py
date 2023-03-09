@@ -98,12 +98,14 @@ def get_models(
             print(f"Norm : {token_embeds[placeholder_token_id].norm():.4f}")
 
         elif init_tok == "<zero>":
-            token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
+            token_embeds[placeholder_token_id] = torch.zeros_like(
+                token_embeds[0])
         else:
             token_ids = tokenizer.encode(init_tok, add_special_tokens=False)
             # Check if initializer_token is a single token or a sequence of tokens
             if len(token_ids) > 1:
-                raise ValueError("The initializer token must be a single token.")
+                raise ValueError(
+                    "The initializer token must be a single token.")
 
             initializer_token_id = token_ids[0]
             token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
@@ -144,7 +146,8 @@ def text2img_dataloader(
             batch = train_dataset[idx]
             # rint(batch)
             latents = vae.encode(
-                batch["instance_images"].unsqueeze(0).to(dtype=vae.dtype).to(vae.device)
+                batch["instance_images"].unsqueeze(
+                    0).to(dtype=vae.dtype).to(vae.device)
             ).latent_dist.sample()
             latents = latents * 0.18215
             batch["instance_images"] = latents.squeeze(0)
@@ -154,7 +157,8 @@ def text2img_dataloader(
         input_ids = [example["instance_prompt_ids"] for example in examples]
         pixel_values = [example["instance_images"] for example in examples]
         pixel_values = torch.stack(pixel_values)
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+        pixel_values = pixel_values.to(
+            memory_format=torch.contiguous_format).float()
 
         input_ids = tokenizer.pad(
             {"input_ids": input_ids},
@@ -169,7 +173,8 @@ def text2img_dataloader(
         }
 
         if examples[0].get("mask", None) is not None:
-            batch["mask"] = torch.stack([example["mask"] for example in examples])
+            batch["mask"] = torch.stack(
+                [example["mask"] for example in examples])
 
         return batch
 
@@ -217,10 +222,12 @@ def inpainting_dataloader(
             ]
 
         pixel_values = (
-            torch.stack(pixel_values).to(memory_format=torch.contiguous_format).float()
+            torch.stack(pixel_values).to(
+                memory_format=torch.contiguous_format).float()
         )
         mask_values = (
-            torch.stack(mask_values).to(memory_format=torch.contiguous_format).float()
+            torch.stack(mask_values).to(
+                memory_format=torch.contiguous_format).float()
         )
         masked_image_values = (
             torch.stack(masked_image_values)
@@ -243,7 +250,8 @@ def inpainting_dataloader(
         }
 
         if examples[0].get("mask", None) is not None:
-            batch["mask"] = torch.stack([example["mask"] for example in examples])
+            batch["mask"] = torch.stack(
+                [example["mask"] for example in examples])
 
         return batch
 
@@ -278,7 +286,8 @@ def loss_step(
 
         if train_inpainting:
             masked_image_latents = vae.encode(
-                batch["masked_image_values"].to(dtype=weight_dtype).to(unet.device)
+                batch["masked_image_values"].to(
+                    dtype=weight_dtype).to(unet.device)
             ).latent_dist.sample()
             masked_image_latents = masked_image_latents * 0.18215
             mask = F.interpolate(
@@ -328,14 +337,16 @@ def loss_step(
             batch["input_ids"].to(text_encoder.device)
         )[0]
 
-        model_pred = unet(latent_model_input, timesteps, encoder_hidden_states).sample
+        model_pred = unet(latent_model_input, timesteps,
+                          encoder_hidden_states).sample
 
     if scheduler.config.prediction_type == "epsilon":
         target = noise
     elif scheduler.config.prediction_type == "v_prediction":
         target = scheduler.get_velocity(latents, noise, timesteps)
     else:
-        raise ValueError(f"Unknown prediction type {scheduler.config.prediction_type}")
+        raise ValueError(
+            f"Unknown prediction type {scheduler.config.prediction_type}")
 
     if batch.get("mask", None) is not None:
 
@@ -343,7 +354,8 @@ def loss_step(
             batch["mask"]
             .to(model_pred.device)
             .reshape(
-                model_pred.shape[0], 1, model_pred.shape[2] * 8, model_pred.shape[3] * 8
+                model_pred.shape[0], 1, model_pred.shape[2] *
+                8, model_pred.shape[3] * 8
             )
         )
         # resize to match model_pred
@@ -455,7 +467,8 @@ def train_inversion(
                                 .norm(dim=-1, keepdim=True)
                             )
 
-                            lambda_ = min(1.0, 100 * lr_scheduler.get_last_lr()[0])
+                            lambda_ = min(
+                                1.0, 100 * lr_scheduler.get_last_lr()[0])
                             text_encoder.get_input_embeddings().weight[
                                 index_updates
                             ] = F.normalize(
@@ -521,7 +534,8 @@ def train_inversion(
                                 or file.lower().endswith(".jpeg")
                             ):
                                 images.append(
-                                    Image.open(os.path.join(test_image_path, file))
+                                    Image.open(os.path.join(
+                                        test_image_path, file))
                                 )
 
                         wandb.log({"loss": loss_sum / save_steps})
@@ -605,7 +619,8 @@ def perform_tuning(
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
+                itertools.chain(unet.parameters(),
+                                text_encoder.parameters()), 1.0
             )
             optimizer.step()
             progress_bar.update(1)
@@ -630,7 +645,8 @@ def perform_tuning(
                     target_replace_module_unet=lora_unet_target_modules,
                 )
                 moved = (
-                    torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
+                    torch.tensor(list(itertools.chain(
+                        *inspect_lora(unet).values())))
                     .mean()
                     .item()
                 )
@@ -663,7 +679,8 @@ def perform_tuning(
                         for file in os.listdir(test_image_path):
                             if file.endswith(".png") or file.endswith(".jpg"):
                                 images.append(
-                                    Image.open(os.path.join(test_image_path, file))
+                                    Image.open(os.path.join(
+                                        test_image_path, file))
                                 )
 
                         wandb.log({"loss": loss_sum / save_steps})
@@ -702,7 +719,7 @@ def train(
     pretrained_vae_name_or_path: str = None,
     revision: Optional[str] = None,
     perform_inversion: bool = True,
-    use_template: Literal[None, "object", "style"] = None,
+    use_template: Literal[None, "object", "style", "location", "face"] = None,
     train_inpainting: bool = False,
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
@@ -997,7 +1014,8 @@ def train(
         ]
         inspect_lora(text_encoder)
 
-    lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
+    lora_optimizers = optim.AdamW(
+        params_to_optimize, weight_decay=weight_decay_lora)
 
     unet.train()
     if train_text_encoder:
