@@ -566,6 +566,7 @@ def perform_tuning(
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
     train_inpainting: bool = False,
+    mixed_precision: bool = False
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -596,7 +597,7 @@ def perform_tuning(
                 scheduler,
                 train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
-                mixed_precision=True,
+                mixed_precision=mixed_precision,
                 mask_temperature=mask_temperature,
                 cached_latents=cached_latents,
             )
