@@ -750,6 +750,7 @@ def train(
     proxy_token: str = "person",
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
+    mixed_precision: bool = False
 ):
     torch.manual_seed(seed)
 
@@ -928,6 +929,7 @@ def train(
             mixed_precision=False,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
+            mixed_precision=mixed_precision
         )
 
         del ti_optimizer
@@ -1034,6 +1036,7 @@ def train(
         wandb_log_prompt_cnt=wandb_log_prompt_cnt,
         class_token=class_token,
         train_inpainting=train_inpainting,
+        mixed_precision=mixed_precision
     )
 
 
