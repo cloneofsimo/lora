@@ -1,3 +1,4 @@
+import os.path
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -132,6 +133,14 @@ def _shuffle(lis):
     return random.sample(lis, len(lis))
 
 
+def _caption_for_file(x):
+    base, ext = os.path.splitext(x)
+    file_txt = base + ".txt"
+    if os.path.exists(file_txt):
+        return open(file_txt).read()
+    else:
+        return os.path.basename(base)
+
 def _get_cutout_holes(
     height,
     width,
@@ -265,9 +274,7 @@ class PivotalTuningDatasetCapation(Dataset):
             )
 
             self.instance_images_path = list(set(possibily_src_images))
-            self.captions = [
-                x.split("/")[-1].split(".")[0] for x in self.instance_images_path
-            ]
+            self.captions = [_caption_for_file(x) for x in self.instance_images_path]
 
         assert (
             len(self.instance_images_path) > 0
