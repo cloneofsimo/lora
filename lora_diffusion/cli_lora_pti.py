@@ -740,13 +740,14 @@ def train(
     weight_decay_ti: float = 0.00,
     weight_decay_lora: float = 0.001,
     use_8bit_adam: bool = False,
+    mixed_precision: bool = False,
     device="cuda:0",
     extra_args: Optional[dict] = None,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     wandb_project_name: str = "new_pti_project",
     wandb_entity: str = "new_pti_entity",
-    proxy_token: str = "person",
+    proxy_token: str = None,
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
 ):
@@ -786,9 +787,9 @@ def train(
         placeholder_tokens
     ), "Unequal Initializer token for Placeholder tokens."
 
+    class_token = "".join(initializer_tokens)
     if proxy_token is not None:
         class_token = proxy_token
-    class_token = "".join(initializer_tokens)
 
     if placeholder_token_at_data is not None:
         tok, pat = placeholder_token_at_data.split("|")
@@ -886,9 +887,22 @@ def train(
 
     if cached_latents:
         vae = None
+
+    if use_8bit_adam:
+        try:
+            import bitsandbytes as bnb
+        except ImportError:
+            raise ImportError(
+                "To use 8-bit Adam, please install the bitsandbytes library: `pip install bitsandbytes`."
+            )
+
+        optimizer_class = bnb.optim.AdamW8bit
+    else:
+        optimizer_class = torch.optim.AdamW
+
     # STEP 1 : Perform Inversion
     if perform_inversion:
-        ti_optimizer = optim.AdamW(
+        ti_optimizer = optimizer_class(
             text_encoder.get_input_embeddings().parameters(),
             lr=ti_lr,
             betas=(0.9, 0.999),
@@ -994,7 +1008,9 @@ def train(
         ]
         inspect_lora(text_encoder)
 
-    lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
+    lora_optimizers = optimizer_class(
+        params_to_optimize, weight_decay=weight_decay_lora
+    )
 
     unet.train()
     if train_text_encoder:
