@@ -179,6 +179,7 @@ class PivotalTuningDatasetCapation(Dataset):
         tokenizer,
         token_map: Optional[dict] = None,
         use_template: Optional[str] = None,
+        custom_prompts: Optional[str] = None,
         size=512,
         h_flip=True,
         color_jitter=False,
@@ -192,6 +193,7 @@ class PivotalTuningDatasetCapation(Dataset):
         self.tokenizer = tokenizer
         self.resize = resize
         self.train_inpainting = train_inpainting
+        self.custom_prompts = custom_prompts
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -282,7 +284,12 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self.use_template = use_template
         if use_template is not None:
-            self.templates = TEMPLATE_MAP[use_template]
+            if custom_prompts:
+                # use custom written prmopts for training. 
+                # this will ignore the use_template input.
+                self.templates = custom_prompts
+            else:
+                self.templates = TEMPLATE_MAP[use_template]
 
         self._length = self.num_instance_images
 
@@ -326,8 +333,10 @@ class PivotalTuningDatasetCapation(Dataset):
         if self.use_template:
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
-
-            text = random.choice(self.templates).format(input_tok)
+            if self.custom_templates:
+                text = self.templates[index % self.num_instance_images]
+            else:
+                text = random.choice(self.templates).format(input_tok)
         else:
             text = self.captions[index % self.num_instance_images].strip()
 
