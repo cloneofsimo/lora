@@ -284,12 +284,7 @@ class PivotalTuningDatasetCapation(Dataset):
 
         self.use_template = use_template
         if use_template is not None:
-            if custom_prompts:
-                # use custom written prmopts for training. 
-                # this will ignore the use_template input.
-                self.templates = custom_prompts
-            else:
-                self.templates = TEMPLATE_MAP[use_template]
+            self.templates = TEMPLATE_MAP[use_template]
 
         self._length = self.num_instance_images
 
@@ -334,7 +329,7 @@ class PivotalTuningDatasetCapation(Dataset):
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
             if self.custom_prompts:
-                text = self.templates[index % self.num_instance_images].format(input_tok)
+                text = self.custom_prompts[index % self.num_instance_images].format(input_tok)
             else:
                 text = random.choice(self.templates).format(input_tok)
         else:
