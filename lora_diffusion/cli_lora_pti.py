@@ -869,7 +869,7 @@ def train(
         use_face_segmentation_condition=use_face_segmentation_condition,
         use_mask_captioned_data=use_mask_captioned_data,
         train_inpainting=train_inpainting,
-        custom_templates=custom_prompts,
+        custom_prompts=custom_prompts,
     )
 
     train_dataset.blur_amount = 200
