@@ -281,7 +281,8 @@ def loss_step(
     mask_temperature=1.0,
     cached_latents: bool = False,
 ):
-    weight_dtype = torch.float32
+    # weight_dtype = torch.float32
+    weight_dtype = torch.float16
     if not cached_latents:
         latents = vae.encode(
             batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
