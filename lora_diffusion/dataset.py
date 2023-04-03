@@ -333,7 +333,7 @@ class PivotalTuningDatasetCapation(Dataset):
         if self.use_template:
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
-            if self.custom_templates:
+            if self.custom_prompts:
                 text = self.templates[index % self.num_instance_images]
             else:
                 text = random.choice(self.templates).format(input_tok)
