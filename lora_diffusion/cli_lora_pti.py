@@ -59,14 +59,12 @@ def get_models(
         pretrained_model_name_or_path,
         subfolder="tokenizer",
         revision=revision,
-        torch_dtype=torch.float16,
     )
 
     text_encoder = CLIPTextModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=revision,
-        torch_dtype=torch.float16,
     )
 
     placeholder_token_ids = []
@@ -116,13 +114,11 @@ def get_models(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
         subfolder=None if pretrained_vae_name_or_path else "vae",
         revision=None if pretrained_vae_name_or_path else revision,
-        torch_dtype=torch.float16,
     )
     unet = UNet2DConditionModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="unet",
         revision=revision,
-        torch_dtype=torch.float16,
     )
 
     return (
@@ -281,8 +277,8 @@ def loss_step(
     mask_temperature=1.0,
     cached_latents: bool = False,
 ):
-    # weight_dtype = torch.float32
-    weight_dtype = torch.float16
+    weight_dtype = torch.float32
+    # weight_dtype = torch.float16
     if not cached_latents:
         latents = vae.encode(
             batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
