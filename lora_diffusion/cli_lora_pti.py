@@ -59,12 +59,14 @@ def get_models(
         pretrained_model_name_or_path,
         subfolder="tokenizer",
         revision=revision,
+        torch_dtype=torch.float16,
     )
 
     text_encoder = CLIPTextModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=revision,
+        torch_dtype=torch.float16,
     )
 
     placeholder_token_ids = []
@@ -114,11 +116,13 @@ def get_models(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
         subfolder=None if pretrained_vae_name_or_path else "vae",
         revision=None if pretrained_vae_name_or_path else revision,
+        torch_dtype=torch.float16,
     )
     unet = UNet2DConditionModel.from_pretrained(
         pretrained_model_name_or_path,
         subfolder="unet",
         revision=revision,
+        torch_dtype=torch.float16,
     )
 
     return (
