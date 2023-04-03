@@ -179,7 +179,7 @@ class PivotalTuningDatasetCapation(Dataset):
         tokenizer,
         token_map: Optional[dict] = None,
         use_template: Optional[str] = None,
-        custom_prompts: Optional[str] = None,
+        custom_prompts: Optional[List[str]] = None,
         size=512,
         h_flip=True,
         color_jitter=False,
@@ -334,7 +334,7 @@ class PivotalTuningDatasetCapation(Dataset):
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
             if self.custom_prompts:
-                text = self.templates[index % self.num_instance_images]
+                text = self.templates[index % self.num_instance_images].format(input_tok)
             else:
                 text = random.choice(self.templates).format(input_tok)
         else:
