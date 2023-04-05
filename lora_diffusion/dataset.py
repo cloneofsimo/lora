@@ -329,7 +329,9 @@ class PivotalTuningDatasetCapation(Dataset):
             assert self.token_map is not None
             input_tok = list(self.token_map.values())[0]
             if self.custom_prompts:
-                text = self.custom_prompts[index % self.num_instance_images].format(input_tok)
+                # this is not random, but hard set foreach training picture
+                text = self.custom_prompts[
+                    index % self.num_instance_images].format(input_tok)
             else:
                 text = random.choice(self.templates).format(input_tok)
         else:
