@@ -156,6 +156,32 @@ class LoraInjectedConv2d(nn.Module):
         ).to(self.lora_up.weight.dtype)
 
 
+class LoraMergedLinear(nn.Linear):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        r: int = 4,
+        weight: torch.Tensor = None,
+        up_weight: torch.Tensor = None,
+        down_weight: torch.Tensor = None,
+        bias: torch.Tensor = None,
+        scale: float = 1.0,
+        dtype: torch.dtype = torch.float16,
+    ):
+        super().__init__(in_features=in_features, out_features=out_features, bias=bias is not None, dtype=dtype)
+
+        assert up_weight.shape[1] == down_weight.shape[0] == r, "LoRA weights have wrong shape"
+        assert r <= min(
+            in_features, out_features
+        ), f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
+
+        self.weight = nn.Parameter(weight + scale * up_weight @ down_weight)
+        self.weight.to(dtype)
+        if bias is not None:
+            self.bias = bias  # already a nn.Parameter
+
+
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
 
 UNET_EXTENDED_TARGET_REPLACE = {"ResnetBlock2D", "CrossAttention", "Attention", "GEGLU"}
@@ -796,6 +822,49 @@ def monkeypatch_or_replace_lora_extended(
         _module._modules[name].to(weight.device)
 
 
+def merge_lora_extended_deepspeed(
+    model,
+    loras,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    r: Union[int, List[int]] = 4,
+):
+    for _module, name, _child_module in _find_modules(
+        model,
+        target_replace_module,
+        search_class=[nn.Linear, nn.Conv2d],
+    ):
+        if _child_module.__class__ == nn.Linear:
+            if len(loras[0].shape) != 2:
+                continue
+
+            _source = _child_module.linear if isinstance(_child_module, LoraInjectedLinear) else _child_module
+            device = _source.weight.device
+            dtype = _source.weight.dtype
+
+            weight = _source.weight.to(torch.float32)
+            bias = _source.bias  # directly assign to _tmp's bias, no need to convert to float32 for computation first
+            up_weight = loras.pop(0).to(torch.float32)
+            down_weight = loras.pop(0).to(torch.float32)
+
+            _tmp = LoraMergedLinear(
+                _source.in_features,
+                _source.out_features,
+                r=r.pop(0) if isinstance(r, list) else r,
+                weight=weight,
+                up_weight=up_weight,
+                down_weight=down_weight,
+                bias=bias,
+                dtype=dtype,
+            )
+
+        elif _child_module.__class__ == nn.Conv2d:
+            raise NotImplementedError("Lora Conv2d deepspeed not implemented yet")
+
+        # switch the module
+        _module._modules[name] = _tmp
+        _module._modules[name].to(dtype=dtype, device=device)
+
+
 def monkeypatch_or_replace_safeloras(models, safeloras):
     loras = parse_safeloras(safeloras)
 
@@ -806,7 +875,8 @@ def monkeypatch_or_replace_safeloras(models, safeloras):
             print(f"No model provided for {name}, contained in Lora")
             continue
 
-        monkeypatch_or_replace_lora_extended(model, lora, target, ranks)
+        # monkeypatch_or_replace_lora_extended(model, lora, target, ranks)
+        merge_lora_extended_deepspeed(model, lora, target, ranks)
 
 
 def monkeypatch_remove_lora(model):
@@ -918,7 +988,6 @@ def apply_learned_embed_in_clip(
         embeds = learned_embeds[token]
 
         # cast to dtype of text_encoder
-        dtype = text_encoder.get_input_embeddings().weight.dtype
         num_added_tokens = tokenizer.add_tokens(token)
 
         i = 1
@@ -934,11 +1003,19 @@ def apply_learned_embed_in_clip(
             print(f"Replacing {token} embedding.")
 
         # resize the token embeddings
-        text_encoder.resize_token_embeddings(len(tokenizer))
+        try:
+            text_encoder.resize_token_embeddings(len(tokenizer))
+        except:
+            print("Resizing token embeddings failed. Retrying with deepspeed setting...")
+            text_encoder.enc.resize_token_embeddings(len(tokenizer))
 
         # get the id for the token and assign the embeds
         token_id = tokenizer.convert_tokens_to_ids(token)
-        text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+        try:
+            text_encoder.get_input_embeddings().weight.data[token_id] = embeds
+        except:
+            print("Assigning token embeddings failed. Retrying with deepspeed setting...")
+            text_encoder.enc.get_input_embeddings().weight.data[token_id] = embeds
     return token
 
 
