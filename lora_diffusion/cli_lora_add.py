@@ -105,6 +105,8 @@ def add(
                     ret_tensor[keys] = tens1
 
             save_file(ret_tensor, output_path, metadata)
+        else:
+             raise ValueError(f"{mode} chosen, but both paths have mismatches file extension.")
 
     elif mode == "upl":
 
