@@ -1102,7 +1102,6 @@ def save_all(
         save_safeloras_for_webui(
             loras, embeds, save_path.replace(".safetensors", "_webui.safetensors")
         )
-        save_safeloras_with_embeds(loras, embeds, save_path)
 
 
 def extract_lora_tensor(
