@@ -28,7 +28,6 @@ except ImportError:
 
     safetensors_available = False
 
-
 class LoraInjectedLinear(nn.Module):
     def __init__(
         self, in_features, out_features, bias=False, r=4, dropout_p=0.1, scale=1.0
@@ -241,11 +240,9 @@ def _find_modules_old(
     ret = []
     for _module in model.modules():
         if _module.__class__.__name__ in ancestor_class:
-
             for name, _child_module in _module.named_modules():
                 if _child_module.__class__ in search_class:
                     ret.append((_module, name, _child_module))
-    print(ret)
     return ret
 
 
@@ -381,7 +378,6 @@ def inject_trainable_lora_extended(
 
 
 def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
-
     loras = []
 
     for _m, _n, _child_module in _find_modules(
@@ -400,7 +396,6 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
 def extract_lora_as_tensor(
     model, target_replace_module=DEFAULT_TARGET_REPLACE, as_fp16=True
 ):
-
     loras = []
 
     for _m, _n, _child_module in _find_modules(
@@ -487,7 +482,7 @@ def save_safeloras(
     modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
     outpath="./lora.safetensors",
 ):
-    return save_safeloras_with_embeds(modelmap=modelmap, outpath=outpath)
+    return save_safeloras_for_webui(modelmap=modelmap, outpath=outpath)
 
 
 def convert_loras_to_safeloras_with_embeds(
@@ -633,13 +628,11 @@ def load_safeloras_both(path, device="cpu"):
 
 
 def collapse_lora(model, alpha=1.0):
-
     for _module, name, _child_module in _find_modules(
         model,
         UNET_EXTENDED_TARGET_REPLACE | TEXT_ENCODER_EXTENDED_TARGET_REPLACE,
         search_class=[LoraInjectedLinear, LoraInjectedConv2d],
     ):
-
         if isinstance(_child_module, LoraInjectedLinear):
             print("Collapsing Lin Lora in", name)
 
@@ -724,7 +717,6 @@ def monkeypatch_or_replace_lora_extended(
         target_replace_module,
         search_class=[nn.Linear, LoraInjectedLinear, nn.Conv2d, LoraInjectedConv2d],
     ):
-
         if (_child_module.__class__ == nn.Linear) or (
             _child_module.__class__ == LoraInjectedLinear
         ):
@@ -798,7 +790,6 @@ def monkeypatch_or_replace_lora_extended(
 
 def monkeypatch_or_replace_safeloras(models, safeloras):
     loras = parse_safeloras(safeloras)
-
     for name, (lora, ranks, target) in loras.items():
         model = getattr(models, name, None)
 
@@ -914,7 +905,6 @@ def apply_learned_embed_in_clip(
         trained_tokens = list(learned_embeds.keys())
 
     for token in trained_tokens:
-        print(token)
         embeds = learned_embeds[token]
 
         # cast to dtype of text_encoder
@@ -1094,9 +1084,11 @@ def save_all(
         embeds = {}
 
         if save_lora:
-
             loras["unet"] = (unet, target_replace_module_unet)
-            loras["text_encoder"] = (text_encoder, target_replace_module_text)
+            loras["text_encoder"] = (
+                text_encoder,
+                target_replace_module_text,
+            )
 
         if save_ti:
             for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
@@ -1107,4 +1099,88 @@ def save_all(
                 )
                 embeds[tok] = learned_embeds.detach().cpu()
 
+        save_safeloras_for_webui(
+            loras, embeds, save_path.replace(".safetensors", "_webui.safetensors")
+        )
         save_safeloras_with_embeds(loras, embeds, save_path)
+
+
+def extract_lora_tensor(
+    model,
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+    as_fp16=True,
+    prefix="lora_te",
+):
+    """
+    Extracts lora tensors from a model and returns them as a dictionary of weights
+    """
+    loras_dict = {}
+
+    for name, module in model.named_modules():
+        if module.__class__.__name__ in target_replace_module:
+            for child_name, child_module in module.named_modules():
+                if child_module.__class__.__name__ == "LoraInjectedLinear" or (
+                    child_module.__class__.__name__ == "LoraInjectedConv2d"
+                    and child_module.kernel_size == (1, 1)
+                ):
+                    lora_name = prefix + "." + name + "." + child_name
+                    lora_name = lora_name.replace(".", "_")
+                    up, down = child_module.realize_as_lora()
+                    alpha = torch.tensor(up.shape[1])
+                    if as_fp16:
+                        up = up.to(torch.float16)
+                        down = down.to(torch.float16)
+                        alpha = alpha.to(torch.float16)
+                    loras_dict[lora_name + ".lora_up.weight"] = up
+                    loras_dict[lora_name + ".lora_down.weight"] = down
+                    loras_dict[lora_name + ".alpha"] = alpha
+
+    if len(loras_dict) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras_dict
+
+
+def save_safeloras_for_webui(
+    modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
+    embeds: Dict[str, torch.Tensor] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Saves the Lora for A1111 from multiple modules in a single safetensor file.
+    Reference from @tengshaofeng
+
+    modelmap is a dictionary of {
+        "module name": (module, target_replace_module)
+    }
+    """
+
+    weights = {}
+    metadata = {}
+
+    for name, (model, target_replace_module) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+        if name == "unet":
+            weights_tmp = extract_lora_tensor(
+                model, target_replace_module, prefix="lora_unet"
+            )
+        else:
+            weights_tmp = extract_lora_tensor(
+                model, target_replace_module, prefix="lora_te"
+            )
+        weights.update(weights_tmp)
+
+    metadata_embeds = {}
+    weights_embeds = {}
+    for token, tensor in embeds.items():
+        metadata_embeds[token] = EMBED_FLAG
+        weights_embeds[token] = tensor
+    # saving the TI embedding to seperate file
+    safe_save(
+        weights_embeds,
+        outpath.replace(".safetensors", "ti.safetensors"),
+        metadata_embeds,
+    )
+
+    print(f"Saving weights to {outpath}")
+    safe_save(weights, outpath, metadata)
