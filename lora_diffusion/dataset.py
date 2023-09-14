@@ -136,11 +136,13 @@ class PivotalTuningDatasetCapation(Dataset):
         use_face_segmentation_condition=False,
         train_inpainting=False,
         blur_amount: int = 70,
+        caption_templates: Optional[List] = []
     ):
         self.size = size
         self.tokenizer = tokenizer
         self.resize = resize
         self.train_inpainting = train_inpainting
+        self.caption_templates = caption_templates
 
         instance_data_root = Path(instance_data_root)
         if not instance_data_root.exists():
@@ -231,6 +233,8 @@ class PivotalTuningDatasetCapation(Dataset):
         self.use_template = use_template
         if use_template is not None:
             self.templates = TEMPLATE_MAP[use_template]
+        if len(self.caption_templates) != 0:
+            self.templates = caption_templates
 
         self._length = self.num_instance_images
 
