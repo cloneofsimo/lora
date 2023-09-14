@@ -749,6 +749,7 @@ def train(
     proxy_token: str = "person",
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
+    caption_templates: List[str] = [],
 ):
     torch.manual_seed(seed)
 
@@ -848,6 +849,7 @@ def train(
         use_face_segmentation_condition=use_face_segmentation_condition,
         use_mask_captioned_data=use_mask_captioned_data,
         train_inpainting=train_inpainting,
+        caption_templates=caption_templates,
     )
 
     train_dataset.blur_amount = 200
