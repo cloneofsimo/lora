@@ -750,6 +750,7 @@ def train(
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
     caption_templates: List[str] = [],
+    **kwargs
 ):
     torch.manual_seed(seed)
 
@@ -1036,6 +1037,8 @@ def train(
         class_token=class_token,
         train_inpainting=train_inpainting,
     )
+    return [f"{k}={v}" for k, v in kwargs.items()]
+    
 
 
 def main():
