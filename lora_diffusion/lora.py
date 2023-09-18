@@ -1177,7 +1177,7 @@ def save_safeloras_for_webui(
     # saving the TI embedding to seperate file
     safe_save(
         weights_embeds,
-        outpath.replace(".safetensors", "ti.safetensors"),
+        outpath.replace(".safetensors", "_ti.safetensors"),
         metadata_embeds,
     )
 
