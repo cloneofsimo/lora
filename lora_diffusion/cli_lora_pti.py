@@ -1037,7 +1037,7 @@ def train(
         class_token=class_token,
         train_inpainting=train_inpainting,
     )
-    return [f"{k}={v}" for k, v in kwargs.items()]
+    return {f"{k}={v}" for k, v in kwargs.items()}
     
 
 
