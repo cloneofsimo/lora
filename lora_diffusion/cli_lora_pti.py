@@ -749,9 +749,9 @@ def train(
     proxy_token: str = "person",
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
-    caption_templates: List[str] = [],
-    **kwargs
+    caption_templates: List[str] = []
 ):
+    args = locals().copy()
     torch.manual_seed(seed)
 
     if log_wandb:
@@ -1037,7 +1037,7 @@ def train(
         class_token=class_token,
         train_inpainting=train_inpainting,
     )
-    return {k:f"{v}" for k, v in kwargs.items()}
+    return args
     
 
 
