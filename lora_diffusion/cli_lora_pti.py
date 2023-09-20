@@ -83,7 +83,7 @@ def get_models(
 
         # Load models and create wrapper for stable diffusion
 
-        text_encoder.resize_token_embeddings(len(tokenizer)+3)
+        text_encoder.resize_token_embeddings(len(tokenizer))
         token_embeds = text_encoder.get_input_embeddings().weight.data
         if init_tok.startswith("<rand"):
             # <rand-"sigma">, e.g. <rand-0.5>
