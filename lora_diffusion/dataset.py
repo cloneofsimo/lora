@@ -202,16 +202,16 @@ class PivotalTuningDatasetCapation(Dataset):
                 targ = f"{instance_data_root}/{idx}.mask.png"
                 # see if the mask exists
                 if not Path(targ).exists():
-                    print(f"Mask not found for {targ}")
+                    # print(f"Mask not found for {targ}")
 
-                    print(
-                        "Warning : this will pre-process all the images in the instance data root."
-                    )
+                    # print(
+                    #     "Warning : this will pre-process all the images in the instance data root."
+                    # )
 
                     if len(self.mask_path) > 0:
-                        print(
-                            "Warning : masks already exists, but will be overwritten."
-                        )
+                        # print(
+                        #     "Warning : masks already exists, but will be overwritten."
+                        # )
 
                     masks = face_mask_google_mediapipe(
                         [
@@ -287,7 +287,7 @@ class PivotalTuningDatasetCapation(Dataset):
                 for token, value in self.token_map.items():
                     text = text.replace(token, value)
 
-        print(text)
+        # print(text)
 
         if self.use_mask:
             example["mask"] = (

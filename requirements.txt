@@ -1,5 +1,5 @@
 diffusers==0.14.0
-transformers>=4.25.1
+transformers==4.33.2
 scipy
 ftfy
 fire

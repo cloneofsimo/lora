@@ -92,10 +92,10 @@ def get_models(
             token_embeds[placeholder_token_id] = (
                 torch.randn_like(token_embeds[0]) * sigma_val
             )
-            print(
-                f"Initialized {token} with random noise (sigma={sigma_val}), empirically {token_embeds[placeholder_token_id].mean().item():.3f} +- {token_embeds[placeholder_token_id].std().item():.3f}"
-            )
-            print(f"Norm : {token_embeds[placeholder_token_id].norm():.4f}")
+            # print(
+            #     f"Initialized {token} with random noise (sigma={sigma_val}), empirically {token_embeds[placeholder_token_id].mean().item():.3f} +- {token_embeds[placeholder_token_id].std().item():.3f}"
+            # )
+            #print(f"Norm : {token_embeds[placeholder_token_id].norm():.4f}")
 
         elif init_tok == "<zero>":
             token_embeds[placeholder_token_id] = torch.zeros_like(token_embeds[0])
@@ -182,7 +182,7 @@ def text2img_dataloader(
             collate_fn=collate_fn,
         )
 
-        print("PTI : Using cached latent.")
+        #print("PTI : Using cached latent.")
 
     else:
         train_dataloader = torch.utils.data.DataLoader(
@@ -396,8 +396,8 @@ def train_inversion(
     clip_ti_decay: bool = True,
 ):
 
-    progress_bar = tqdm(range(num_steps))
-    progress_bar.set_description("Steps")
+    #progress_bar = tqdm(range(num_steps))
+    #progress_bar.set_description("Steps")
     global_step = 0
 
     # Original Emb for TI
@@ -436,12 +436,12 @@ def train_inversion(
 
                 if global_step % accum_iter == 0:
                     # print gradient of text encoder embedding
-                    print(
-                        text_encoder.get_input_embeddings()
-                        .weight.grad[index_updates, :]
-                        .norm(dim=-1)
-                        .mean()
-                    )
+                    # print(
+                    #     text_encoder.get_input_embeddings()
+                    #     .weight.grad[index_updates, :]
+                    #     .norm(dim=-1)
+                    #     .mean()
+                    # )
                     optimizer.step()
                     optimizer.zero_grad()
 
@@ -466,7 +466,7 @@ def train_inversion(
                             ) * (
                                 pre_norm + lambda_ * (0.4 - pre_norm)
                             )
-                            print(pre_norm)
+                            #print(pre_norm)
 
                         current_norm = (
                             text_encoder.get_input_embeddings()
@@ -478,16 +478,16 @@ def train_inversion(
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
 
-                        print(f"Current Norm : {current_norm}")
+                        #print(f"Current Norm : {current_norm}")
 
                 global_step += 1
-                progress_bar.update(1)
+                #progress_bar.update(1)
 
                 logs = {
                     "loss": loss.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0],
                 }
-                progress_bar.set_postfix(**logs)
+                #progress_bar.set_postfix(**logs)
 
             if global_step % save_steps == 0:
                 save_all(
@@ -568,8 +568,8 @@ def perform_tuning(
     train_inpainting: bool = False,
 ):
 
-    progress_bar = tqdm(range(num_steps))
-    progress_bar.set_description("Steps")
+    #progress_bar = tqdm(range(num_steps))
+    #progress_bar.set_description("Steps")
     global_step = 0
 
     weight_dtype = torch.float16
@@ -607,12 +607,12 @@ def perform_tuning(
                 itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
             )
             optimizer.step()
-            progress_bar.update(1)
+            #progress_bar.update(1)
             logs = {
                 "loss": loss.detach().item(),
                 "lr": lr_scheduler_lora.get_last_lr()[0],
             }
-            progress_bar.set_postfix(**logs)
+            #progress_bar.set_postfix(**logs)
 
             global_step += 1
 
@@ -634,7 +634,7 @@ def perform_tuning(
                     .item()
                 )
 
-                print("LORA Unet Moved", moved)
+                #print("LORA Unet Moved", moved)
                 moved = (
                     torch.tensor(
                         list(itertools.chain(*inspect_lora(text_encoder).values()))
@@ -643,7 +643,7 @@ def perform_tuning(
                     .item()
                 )
 
-                print("LORA CLIP Moved", moved)
+                #print("LORA CLIP Moved", moved)
 
                 if log_wandb:
                     with torch.no_grad():
@@ -770,7 +770,7 @@ def train(
     # print(placeholder_tokens, initializer_tokens)
     if len(placeholder_tokens) == 0:
         placeholder_tokens = []
-        print("PTI : Placeholder Tokens not given, using null token")
+        #print("PTI : Placeholder Tokens not given, using null token")
     else:
         placeholder_tokens = placeholder_tokens.split("|")
 
@@ -779,7 +779,7 @@ def train(
         ), f"Placeholder tokens should be sorted. Use something like {'|'.join(sorted(placeholder_tokens))}'"
 
     if initializer_tokens is None:
-        print("PTI : Initializer Tokens not given, doing random inits")
+        #print("PTI : Initializer Tokens not given, doing random inits")
         initializer_tokens = ["<rand-0.017>"] * len(placeholder_tokens)
     else:
         initializer_tokens = initializer_tokens.split("|")
@@ -799,8 +799,8 @@ def train(
     else:
         token_map = {"DUMMY": "".join(placeholder_tokens)}
 
-    print("PTI : Placeholder Tokens", placeholder_tokens)
-    print("PTI : Initializer Tokens", initializer_tokens)
+    #print("PTI : Placeholder Tokens", placeholder_tokens)
+    #print("PTI : Initializer Tokens", initializer_tokens)
 
     # get the models
     text_encoder, vae, unet, tokenizer, placeholder_token_ids = get_models(
@@ -944,18 +944,18 @@ def train(
             scale=lora_scale,
         )
     else:
-        print("PTI : USING EXTENDED UNET!!!")
+        #print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
             lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
         )
-        print("PTI : Will replace modules: ", lora_unet_target_modules)
+        #print("PTI : Will replace modules: ", lora_unet_target_modules)
 
         unet_lora_params, _ = inject_trainable_lora_extended(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
-    print(f"PTI : has {len(unet_lora_params)} lora")
+    #print(f"PTI : has {len(unet_lora_params)} lora")
 
-    print("PTI : Before training:")
+    #print("PTI : Before training:")
     inspect_lora(unet)
 
     params_to_optimize = [
