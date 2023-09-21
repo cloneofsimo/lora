@@ -1,3 +1,4 @@
+import glob
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
@@ -6,7 +7,7 @@ from PIL import Image
 from torch import zeros_like
 from torch.utils.data import Dataset
 from torchvision import transforms
-import glob
+
 from .preprocess_files import face_mask_google_mediapipe
 
 OBJECT_TEMPLATE = [
@@ -79,7 +80,6 @@ def _randomset(lis):
 
 
 def _shuffle(lis):
-
     return random.sample(lis, len(lis))
 
 
@@ -108,7 +108,7 @@ def _get_cutout_holes(
 def _generate_random_mask(image):
     mask = zeros_like(image[:1])
     holes = _get_cutout_holes(mask.shape[1], mask.shape[2])
-    for (x1, y1, x2, y2) in holes:
+    for x1, y1, x2, y2 in holes:
         mask[:, y1:y2, x1:x2] = 1.0
     if random.uniform(0, 1) < 0.25:
         mask.fill_(1.0)
@@ -136,7 +136,7 @@ class PivotalTuningDatasetCapation(Dataset):
         use_face_segmentation_condition=False,
         train_inpainting=False,
         blur_amount: int = 70,
-        caption_templates: Optional[List] = []
+        caption_templates: Optional[List] = [],
     ):
         self.size = size
         self.tokenizer = tokenizer
@@ -197,7 +197,6 @@ class PivotalTuningDatasetCapation(Dataset):
         self.use_mask_captioned_data = use_mask_captioned_data
 
         if use_face_segmentation_condition:
-
             for idx in range(len(self.instance_images_path)):
                 targ = f"{instance_data_root}/{idx}.mask.png"
                 # see if the mask exists
@@ -208,10 +207,10 @@ class PivotalTuningDatasetCapation(Dataset):
                     #     "Warning : this will pre-process all the images in the instance data root."
                     # )
 
-                    if len(self.mask_path) > 0:
-                        # print(
-                        #     "Warning : masks already exists, but will be overwritten."
-                        # )
+                    # if len(self.mask_path) > 0:
+                    # print(
+                    #     "Warning : masks already exists, but will be overwritten."
+                    # )
 
                     masks = face_mask_google_mediapipe(
                         [
