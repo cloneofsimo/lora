@@ -1,15 +1,16 @@
 # Bootstrapped from:
 # https://github.com/huggingface/diffusers/blob/main/examples/dreambooth/train_dreambooth.py
 
-import argparse
-import hashlib
-import inspect
 import itertools
 import math
 import os
+
+import json
+import time
 import random
 import re
 from pathlib import Path
+import numpy as np
 from typing import Optional, List, Literal
 
 import torch
@@ -32,6 +33,14 @@ from transformers import CLIPTextModel, CLIPTokenizer
 import wandb
 import fire
 
+import sys
+if sys.version_info >= (3,8):
+    from typing import Literal
+else : 
+    from typing_extensions import Literal
+
+from typing import Optional, List
+
 from lora_diffusion import (
     PivotalTuningDatasetCapation,
     extract_lora_ups_down,
@@ -44,6 +53,33 @@ from lora_diffusion import (
     evaluate_pipe,
     UNET_EXTENDED_TARGET_REPLACE,
 )
+
+
+def preview_training_batch(train_dataloader, mode, n_imgs=40):
+    outdir = f"training_batch_preview/{mode}"
+    os.makedirs(outdir, exist_ok=True)
+    imgs_saved = 0
+
+    while True:
+        for batch_i, batch in enumerate(train_dataloader):
+            imgs = batch["pixel_values"]
+            for i, img_torch in enumerate(imgs):
+                img_torch = (img_torch + 1) / 2
+                # convert to pil and save to disk:
+                img = Image.fromarray(
+                    (255.0 * img_torch)
+                    .permute(1, 2, 0)
+                    .detach()
+                    .cpu()
+                    .numpy()
+                    .astype(np.uint8)
+                ).convert("RGB")
+                img.save(f"{outdir}/preview_{imgs_saved}.jpg")
+                imgs_saved += 1
+
+        if imgs_saved > n_imgs:
+            print(f"\nSaved {imgs_saved} preview training imgs to {outdir}")
+            return
 
 
 def get_models(
@@ -107,6 +143,12 @@ def get_models(
 
             initializer_token_id = token_ids[0]
             token_embeds[placeholder_token_id] = token_embeds[initializer_token_id]
+
+            # print some stats about the token embedding:
+            t = token_embeds[placeholder_token_id]
+            print(
+                f"init_token {init_tok} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}"
+            )
 
     vae = AutoencoderKL.from_pretrained(
         pretrained_vae_name_or_path or pretrained_model_name_or_path,
@@ -188,6 +230,7 @@ def text2img_dataloader(
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=train_batch_size,
+            num_workers=4,
             shuffle=True,
             collate_fn=collate_fn,
         )
@@ -249,6 +292,7 @@ def inpainting_dataloader(
 
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
+        num_workers=4,
         batch_size=train_batch_size,
         shuffle=True,
         collate_fn=collate_fn,
@@ -263,6 +307,7 @@ def loss_step(
     vae,
     text_encoder,
     scheduler,
+    optimized_embeddings=None,
     train_inpainting=False,
     t_mutliplier=1.0,
     mixed_precision=False,
@@ -286,11 +331,11 @@ def loss_step(
                 scale_factor=1 / 8,
             )
     else:
-        latents = batch["pixel_values"]
+        latents = batch["pixel_values"].to(dtype=weight_dtype).to(unet.device)
 
         if train_inpainting:
             masked_image_latents = batch["masked_image_latents"]
-            mask = batch["mask_values"]
+            mask = batch["mask_values"].to(dtype=weight_dtype).to(unet.device)
 
     noise = torch.randn_like(latents)
     bsz = latents.shape[0]
@@ -367,6 +412,12 @@ def loss_step(
         .mean()
     )
 
+    if optimized_embeddings is not None:
+        embedding_norm = optimized_embeddings.norm(dim=1).mean()
+        target_norm = 0.39
+        embedding_norm_loss = (embedding_norm - target_norm) ** 2
+        loss += 0.005 * embedding_norm_loss
+
     return loss
 
 
@@ -396,6 +447,7 @@ def train_inversion(
     clip_ti_decay: bool = True,
 ):
 
+    print("Performing Inversion....")
     progress_bar = tqdm(range(num_steps))
     progress_bar.set_description("Steps")
     global_step = 0
@@ -408,6 +460,7 @@ def train_inversion(
 
     index_updates = ~index_no_updates
     loss_sum = 0.0
+    losses = []
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         unet.eval()
@@ -424,6 +477,7 @@ def train_inversion(
                         vae,
                         text_encoder,
                         scheduler,
+                        optimized_embeddings=None,
                         train_inpainting=train_inpainting,
                         mixed_precision=mixed_precision,
                         cached_latents=cached_latents,
@@ -431,6 +485,7 @@ def train_inversion(
                     / accum_iter
                 )
 
+                losses.append(loss.detach().mean().item())
                 loss.backward()
                 loss_sum += loss.detach().item()
 
@@ -466,19 +521,22 @@ def train_inversion(
                             ) * (
                                 pre_norm + lambda_ * (0.4 - pre_norm)
                             )
-                            print(pre_norm)
+                            # print(pre_norm)
 
-                        current_norm = (
-                            text_encoder.get_input_embeddings()
-                            .weight[index_updates, :]
-                            .norm(dim=-1)
-                        )
+                        optimizing_embeds = text_encoder.get_input_embeddings().weight[
+                            index_updates, :
+                        ]
+                        current_norm = optimizing_embeds.norm(dim=-1)
 
+                        # reset original embeddings (we're only optimizing the new token ones)
                         text_encoder.get_input_embeddings().weight[
                             index_no_updates
                         ] = orig_embeds_params[index_no_updates]
 
-                        print(f"Current Norm : {current_norm}")
+                        for i, t in enumerate(optimizing_embeds):
+                            print(
+                                f"token {i} --> mean: {t.mean().item():.3f}, std: {t.std().item():.3f}, norm: {t.norm():.4f}"
+                            )
 
                 global_step += 1
                 progress_bar.update(1)
@@ -490,6 +548,7 @@ def train_inversion(
                 progress_bar.set_postfix(**logs)
 
             if global_step % save_steps == 0:
+                plot_loss_curve(losses, "textual_inversion")
                 save_all(
                     unet=unet,
                     text_encoder=text_encoder,
@@ -542,6 +601,20 @@ def train_inversion(
                 return
 
 
+import matplotlib.pyplot as plt
+
+
+def plot_loss_curve(losses, name, moving_avg=20):
+    losses = np.array(losses)
+    losses = np.convolve(losses, np.ones(moving_avg) / moving_avg, mode="valid")
+    plt.plot(losses)
+    plt.xlabel("Step")
+    plt.ylabel("Loss")
+    plt.title(f"Losses during {name} phase:")
+    plt.savefig(f"{name}.png")
+    plt.clf()
+
+
 def perform_tuning(
     unet,
     vae,
@@ -562,12 +635,13 @@ def perform_tuning(
     tokenizer,
     test_image_path: str,
     cached_latents: bool,
+    index_no_updates=None,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     class_token: str = "person",
     train_inpainting: bool = False,
 ):
-
+    print("Performing Tuning....")
     progress_bar = tqdm(range(num_steps))
     progress_bar.set_description("Steps")
     global_step = 0
@@ -577,12 +651,22 @@ def perform_tuning(
     unet.train()
     text_encoder.train()
 
+    # Save the current token embeddings:
+    orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
+
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
 
+    print(f"Performing {math.ceil(num_steps / len(dataloader))} epochs of training!")
     loss_sum = 0.0
+    losses = []
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
+        if not cached_latents:
+            dataloader.dataset.tune_h_flip_prob(
+                epoch / math.ceil(num_steps / len(dataloader))
+            )
+
         for batch in dataloader:
             lr_scheduler_lora.step()
 
@@ -594,6 +678,7 @@ def perform_tuning(
                 vae,
                 text_encoder,
                 scheduler,
+                optimized_embeddings=text_encoder.get_input_embeddings().weight[:, :],
                 train_inpainting=train_inpainting,
                 t_mutliplier=0.8,
                 mixed_precision=True,
@@ -613,10 +698,21 @@ def perform_tuning(
                 "lr": lr_scheduler_lora.get_last_lr()[0],
             }
             progress_bar.set_postfix(**logs)
+            losses.append(loss.detach().item())
+
+            if index_no_updates is not None:
+                with torch.no_grad():
+                    # reset original embeddings (we're only optimizing the new tokens)
+                    text_encoder.get_input_embeddings().weight[
+                        index_no_updates
+                    ] = orig_embeds_params[index_no_updates]
 
             global_step += 1
 
             if global_step % save_steps == 0:
+                # plot the loss curve:
+                plot_loss_curve(losses, "tuning")
+
                 save_all(
                     unet,
                     text_encoder,
@@ -701,7 +797,7 @@ def train(
     pretrained_vae_name_or_path: str = None,
     revision: Optional[str] = None,
     perform_inversion: bool = True,
-    use_template: Literal[None, "object", "style"] = None,
+    use_template: Literal[None, "object", "style", "person"] = None,
     train_inpainting: bool = False,
     placeholder_tokens: str = "",
     placeholder_token_at_data: Optional[str] = None,
@@ -750,7 +846,11 @@ def train(
     enable_xformers_memory_efficient_attention: bool = False,
     out_name: str = "final_lora",
 ):
+    script_start_time = time.time()
     torch.manual_seed(seed)
+
+    # Get a dict with all the arguments:
+    args_dict = locals()
 
     if log_wandb:
         wandb.init(
@@ -771,7 +871,6 @@ def train(
         print("PTI : Placeholder Tokens not given, using null token")
     else:
         placeholder_tokens = placeholder_tokens.split("|")
-
         assert (
             sorted(placeholder_tokens) == placeholder_tokens
         ), f"Placeholder tokens should be sorted. Use something like {'|'.join(sorted(placeholder_tokens))}'"
@@ -886,14 +985,27 @@ def train(
 
     if cached_latents:
         vae = None
+
     # STEP 1 : Perform Inversion
     if perform_inversion:
+        if not cached_latents:
+            preview_training_batch(train_dataloader, "inversion")
+
+        print("PTI : Performing Inversion")
         ti_optimizer = optim.AdamW(
             text_encoder.get_input_embeddings().parameters(),
             lr=ti_lr,
             betas=(0.9, 0.999),
             eps=1e-08,
             weight_decay=weight_decay_ti,
+        )
+
+        token_ids_positions_to_update = np.where(index_no_updates.cpu().numpy() == 0)
+        print(
+            "Training embedding of size",
+            text_encoder.get_input_embeddings()
+            .weight[token_ids_positions_to_update]
+            .shape,
         )
 
         lr_scheduler = get_scheduler(
@@ -930,6 +1042,7 @@ def train(
         )
 
         del ti_optimizer
+        print("###############  Inversion Done  ###############")
 
     # Next perform Tuning with LoRA:
     if not use_extended_lora:
@@ -940,17 +1053,16 @@ def train(
             dropout_p=lora_dropout_p,
             scale=lora_scale,
         )
+        print("PTI : not use_extended_lora...")
     else:
         print("PTI : USING EXTENDED UNET!!!")
         lora_unet_target_modules = (
             lora_unet_target_modules | UNET_EXTENDED_TARGET_REPLACE
         )
         print("PTI : Will replace modules: ", lora_unet_target_modules)
-
         unet_lora_params, _ = inject_trainable_lora_extended(
             unet, r=lora_rank, target_replace_module=lora_unet_target_modules
         )
-    print(f"PTI : has {len(unet_lora_params)} lora")
 
     print("PTI : Before training:")
     inspect_lora(unet)
@@ -980,6 +1092,7 @@ def train(
             param.requires_grad = False
     else:
         text_encoder.requires_grad_(False)
+
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder,
@@ -995,9 +1108,18 @@ def train(
         inspect_lora(text_encoder)
 
     lora_optimizers = optim.AdamW(params_to_optimize, weight_decay=weight_decay_lora)
+    with torch.no_grad():
+        n_optimizable_unet_params = sum(
+            p.numel() for p in unet.parameters() if p.requires_grad
+        )
+        +sum(p.numel() for p in text_encoder.parameters() if p.requires_grad)
 
+    print("PTI : n_optimizable_unet_params: ", n_optimizable_unet_params)
+
+    print(f"PTI : has {len(unet_lora_params)} lora")
     unet.train()
     if train_text_encoder:
+        print("Training text encoder!")
         text_encoder.train()
 
     train_dataset.blur_amount = 70
@@ -1008,6 +1130,8 @@ def train(
         num_warmup_steps=lr_warmup_steps_lora,
         num_training_steps=max_train_steps_tuning,
     )
+    if not cached_latents:
+        preview_training_batch(train_dataloader, "tuning")
 
     perform_tuning(
         unet,
@@ -1015,6 +1139,7 @@ def train(
         text_encoder,
         train_dataloader,
         max_train_steps_tuning,
+        index_no_updates=index_no_updates,
         cached_latents=cached_latents,
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
@@ -1035,6 +1160,19 @@ def train(
         train_inpainting=train_inpainting,
     )
 
+    print("###############  Tuning Done  ###############")
+    training_time = time.time() - script_start_time
+    print(f"Training time: {training_time/60:.1f} minutes")
+    args_dict["training_time_s"] = int(training_time)
+
+    # Save the args_dict to the output directory as a json file:
+    with open(os.path.join(output_dir, "lora_training_args.json"), "w") as f:
+        json.dump(args_dict, f, default=lambda o: "<not serializable>", indent=2)
+
 
 def main():
     fire.Fire(train)
+
+
+if __name__ == "__main__":
+    main()

@@ -9,3 +9,4 @@ exps*
 .vscode
 build
 lora_diffusion.egg-info
+training_batch_preview
