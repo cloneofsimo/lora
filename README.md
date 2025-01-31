@@ -132,7 +132,15 @@ pip install git+https://github.com/cloneofsimo/lora.git
 
 # Getting Started
 
-## 1. Fine-tuning Stable diffusion with LoRA CLI
+## 1. Prepare Your Datasets
+
+You will need a folder with all the images inside and a csv file such as `metadata.csv`. 
+
+Inside `metadata.csv` you need 2 columns, one with the image `name` and the other called `text` which will have the captions for the associated image. 
+
+This is the format that HuggingFace `datasets` library will recognise.
+
+## 2a. Fine-tuning Stable diffusion with LoRA CLI
 
 If you have over 12 GB of memory, it is recommended to use Pivotal Tuning Inversion CLI provided with lora implementation. They have the best performance, and will be updated many times in the future as well. These are the parameters that worked for various dataset. _ALL OF THE EXAMPLE ABOVE WERE TRAINED WITH BELOW PARAMETERS_
 
@@ -174,7 +182,7 @@ lora_pti \
 
 [Check here to see what these parameters mean](https://github.com/cloneofsimo/lora/discussions/121).
 
-## 2. Other Options
+## 2b. Other Options
 
 Basic usage is as follows: prepare sets of $A, B$ matrices in an unet model, and fine-tune them.
 
